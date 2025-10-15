@@ -3,7 +3,6 @@
 [![Crates.io](https://img.shields.io/crates/v/archive.svg)](https://crates.io/crates/archive)
 [![Documentation](https://docs.rs/archive/badge.svg)](https://docs.rs/archive)
 [![CI](https://github.com/secana/archive/workflows/Archive%20CI/badge.svg)](https://github.com/secana/archive/actions)
-[![License: MIT OR Apache-2.0](https://img.shields.io/crates/l/archive.svg)](#license)
 
 A unified, pure-Rust interface for extracting common archive formats in-memory.
 
@@ -31,6 +30,16 @@ A unified, pure-Rust interface for extracting common archive formats in-memory.
 | **TAR.LZ4** | `.tar.lz4` | TAR with LZ4 compression |
 | **7-Zip** | `.7z` | 7-Zip archives |
 | **Single-file** | `.gz`, `.bz2`, `.xz`, `.lz4`, `.zst` | Individual compressed files |
+
+## Generate test archives
+
+To generate the test archives used in this repository, you can use the provided Nix shell. First, ensure you have Nix installed on your system. Then, run the following commands:
+
+```sh
+nix run .#generateTestArchives
+
+cargo test
+```
 
 ## Publish new version
 
