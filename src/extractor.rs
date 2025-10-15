@@ -125,7 +125,7 @@ impl ArchiveExtractor {
 
     fn extract_tar_bz2(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
         let cursor = Cursor::new(data);
-        let decoder = bzip2_rs::DecoderReader::new(cursor);
+        let decoder = bzip2::read::BzDecoder::new(cursor);
         let mut archive = tar::Archive::new(decoder);
         self.process_tar_entries(&mut archive)
     }

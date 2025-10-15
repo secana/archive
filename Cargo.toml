@@ -14,7 +14,7 @@ categories = ["compression", "filesystem"]
 zip = { version = "6.0", default-features = false, features = ["deflate"] }
 tar = "0.4"
 flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
-bzip2-rs = "0.1"
+bzip2 = "0.6"
 lzma-rs = "0.3"
 lz4 = "1.28"
 zstd = "0.13"
