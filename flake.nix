@@ -30,6 +30,15 @@
             tree        # For viewing directory structure
             file        # For file type identification
             coreutils   # For basic file operations
+            
+            # Rust development tools
+            rustc
+            cargo
+            rustfmt
+            clippy
+            
+            # Git for version control
+            git
           ];
 
           shellHook = ''
@@ -45,6 +54,7 @@
             echo "  - lzip/lz4"
             echo ""
             echo "Run 'nix run .#generateTestArchives' to create all test archives"
+            echo "Run 'nix run .#publish <version>' to publish a new version to crates.io"
           '';
         };
 
@@ -344,6 +354,109 @@
           echo "  tar -tJf *.tar.xz"
         '';
 
+        packages.publish = pkgs.writeShellScriptBin "publish-crate" ''
+          set -e
+          
+          # Add required tools to PATH
+          export PATH="${pkgs.lib.makeBinPath [
+            pkgs.git
+            pkgs.cargo
+            pkgs.gnused
+            pkgs.gnugrep
+            pkgs.coreutils
+          ]}:$PATH"
+          
+          VERSION="$1"
+          
+          # Check if the version was provided
+          if [ -z "$VERSION" ]; then
+              echo "Error: No version provided"
+              echo "Usage: nix run .#publish <version>"
+              echo "Example: nix run .#publish 0.1.0"
+              exit 1
+          fi
+          
+          # Check if the version is valid
+          if ! echo "$VERSION" | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+$"; then
+              echo "Error: Invalid version"
+              echo "Version must be in the format X.Y.Z"
+              exit 1
+          fi
+          
+          # Check if on main branch
+          CURRENT_BRANCH=$(git branch --show-current)
+          if [ "$CURRENT_BRANCH" != "main" ]; then
+              echo "Error: Not on main branch (currently on: $CURRENT_BRANCH)"
+              exit 1
+          fi
+          
+          # Check if working directory is clean
+          if [ -n "$(git status --porcelain)" ]; then
+              echo "Error: Working directory is not clean"
+              echo "Please commit or stash your changes first"
+              git status --short
+              exit 1
+          fi
+          
+          # Check if the version is already in the Cargo.toml file
+          if grep -qE "^version = \"$VERSION\"" Cargo.toml; then
+              echo "Error: Version $VERSION is already in Cargo.toml"
+              exit 1
+          fi
+          
+          # Check if tag already exists
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+              echo "Error: Tag v$VERSION already exists"
+              exit 1
+          fi
+          
+          echo "Publishing version $VERSION..."
+          echo ""
+          
+          # Update the version in the Cargo.toml file
+          echo "Updating Cargo.toml..."
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+          
+          # Run tests to make sure everything works
+          echo ""
+          echo "Running tests..."
+          cargo test
+          
+          # Build to ensure it compiles
+          echo ""
+          echo "Building release..."
+          cargo build --release
+          
+          # Commit the changes
+          echo ""
+          echo "Committing changes..."
+          git add Cargo.toml Cargo.lock
+          git commit -m "Release version $VERSION"
+          
+          # Tag the commit
+          echo "Creating tag v$VERSION..."
+          git tag "v$VERSION"
+          
+          # Push the tag
+          echo "Pushing tag..."
+          git push origin "v$VERSION"
+          
+          # Push the changes
+          echo "Pushing changes..."
+          git push
+          
+          # Publish to crates.io
+          echo ""
+          echo "Publishing to crates.io..."
+          cargo publish
+          
+          echo ""
+          echo "✅ Successfully published version $VERSION!"
+          echo ""
+          echo "View on crates.io: https://crates.io/crates/archive"
+          echo "Git tag: v$VERSION"
+        '';
+
         apps = {
           default = {
             type = "app";
@@ -353,6 +466,11 @@
           generateTestArchives = {
             type = "app";
             program = "${self.packages.${system}.generate-archives}/bin/generate-test-archives";
+          };
+          
+          publish = {
+            type = "app";
+            program = "${self.packages.${system}.publish}/bin/publish-crate";
           };
         };
       }
