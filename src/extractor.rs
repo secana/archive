@@ -59,7 +59,12 @@ impl ArchiveExtractor {
             ArchiveFormat::TarXz => self.extract_tar_xz(data),
             ArchiveFormat::TarZst => self.extract_tar_zst(data),
             ArchiveFormat::TarLz4 => self.extract_tar_lz4(data),
-            _ => Err(ArchiveError::UnsupportedFormat(format.name().into())),
+            ArchiveFormat::SevenZ => self.extract_7z(data),
+            ArchiveFormat::Gz => self.extract_single_gz(data),
+            ArchiveFormat::Bz2 => self.extract_single_bz2(data),
+            ArchiveFormat::Xz => self.extract_single_xz(data),
+            ArchiveFormat::Lz4 => self.extract_single_lz4(data),
+            ArchiveFormat::Zst => self.extract_single_zst(data),
         }
     }
 
@@ -152,6 +157,174 @@ impl ArchiveExtractor {
         let decoder = lz4::Decoder::new(cursor)?;
         let mut archive = tar::Archive::new(decoder);
         self.process_tar_entries(&mut archive)
+    }
+
+    fn extract_7z(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+        use std::io::Seek;
+
+        let mut cursor = Cursor::new(data);
+        let len = cursor.get_ref().len() as u64;
+
+        let archive = sevenz_rust::SevenZReader::new(&mut cursor, len, "".into())
+            .map_err(|e| ArchiveError::InvalidArchive(format!("7z error: {}", e)))?;
+
+        let mut files = Vec::new();
+        let mut total_size = 0usize;
+
+        for entry in archive.archive().files.iter() {
+            if entry.is_directory() {
+                files.push(ExtractedFile {
+                    path: entry.name().to_string(),
+                    data: Vec::new(),
+                    is_directory: true,
+                });
+            } else {
+                let size = entry.size() as usize;
+                if size > self.max_file_size {
+                    return Err(ArchiveError::FileTooLarge {
+                        size,
+                        limit: self.max_file_size,
+                    });
+                }
+
+                total_size += size;
+                if total_size > self.max_total_size {
+                    return Err(ArchiveError::TotalSizeTooLarge {
+                        size: total_size,
+                        limit: self.max_total_size,
+                    });
+                }
+
+                files.push(ExtractedFile {
+                    path: entry.name().to_string(),
+                    data: Vec::new(), // Placeholder - we'll fill this below
+                    is_directory: false,
+                });
+            }
+        }
+
+        // Re-read the archive to extract file contents
+        cursor.seek(std::io::SeekFrom::Start(0))?;
+        let mut archive = sevenz_rust::SevenZReader::new(&mut cursor, len, "".into())
+            .map_err(|e| ArchiveError::InvalidArchive(format!("7z error: {}", e)))?;
+
+        archive
+            .for_each_entries(|entry, reader| {
+                if !entry.is_directory() {
+                    // Find the corresponding file in our list
+                    if let Some(file) = files.iter_mut().find(|f| f.path == entry.name()) {
+                        let mut contents = Vec::new();
+                        reader.read_to_end(&mut contents)?;
+                        file.data = contents;
+                    }
+                }
+                Ok(true)
+            })
+            .map_err(|e| ArchiveError::InvalidArchive(format!("7z extraction error: {}", e)))?;
+
+        Ok(files)
+    }
+
+    // Single-file decompression methods
+
+    fn extract_single_gz(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+        let cursor = Cursor::new(data);
+        let mut decoder = flate2::read::GzDecoder::new(cursor);
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed)?;
+
+        if decompressed.len() > self.max_file_size {
+            return Err(ArchiveError::FileTooLarge {
+                size: decompressed.len(),
+                limit: self.max_file_size,
+            });
+        }
+
+        Ok(vec![ExtractedFile {
+            path: "decompressed".to_string(),
+            data: decompressed,
+            is_directory: false,
+        }])
+    }
+
+    fn extract_single_bz2(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+        let cursor = Cursor::new(data);
+        let mut decoder = bzip2::read::BzDecoder::new(cursor);
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed)?;
+
+        if decompressed.len() > self.max_file_size {
+            return Err(ArchiveError::FileTooLarge {
+                size: decompressed.len(),
+                limit: self.max_file_size,
+            });
+        }
+
+        Ok(vec![ExtractedFile {
+            path: "decompressed".to_string(),
+            data: decompressed,
+            is_directory: false,
+        }])
+    }
+
+    fn extract_single_xz(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+        let mut cursor = Cursor::new(data);
+        let mut decompressed = Vec::new();
+        lzma_rs::xz_decompress(&mut cursor, &mut decompressed)
+            .map_err(|e| ArchiveError::InvalidArchive(e.to_string()))?;
+
+        if decompressed.len() > self.max_file_size {
+            return Err(ArchiveError::FileTooLarge {
+                size: decompressed.len(),
+                limit: self.max_file_size,
+            });
+        }
+
+        Ok(vec![ExtractedFile {
+            path: "decompressed".to_string(),
+            data: decompressed,
+            is_directory: false,
+        }])
+    }
+
+    fn extract_single_lz4(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+        let cursor = Cursor::new(data);
+        let mut decoder = lz4::Decoder::new(cursor)?;
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed)?;
+
+        if decompressed.len() > self.max_file_size {
+            return Err(ArchiveError::FileTooLarge {
+                size: decompressed.len(),
+                limit: self.max_file_size,
+            });
+        }
+
+        Ok(vec![ExtractedFile {
+            path: "decompressed".to_string(),
+            data: decompressed,
+            is_directory: false,
+        }])
+    }
+
+    fn extract_single_zst(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+        let cursor = Cursor::new(data);
+        let mut decoder = zstd::stream::read::Decoder::new(cursor)?;
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed)?;
+
+        if decompressed.len() > self.max_file_size {
+            return Err(ArchiveError::FileTooLarge {
+                size: decompressed.len(),
+                limit: self.max_file_size,
+            });
+        }
+
+        Ok(vec![ExtractedFile {
+            path: "decompressed".to_string(),
+            data: decompressed,
+            is_directory: false,
+        }])
     }
 
     fn process_tar_entries<R: Read>(

@@ -30,6 +30,10 @@ fn assert_contains_file<'a>(files: &'a [ExtractedFile], path_contains: &str) -> 
         })
 }
 
+// ============================================================================
+// ZIP Archive Tests
+// ============================================================================
+
 #[test]
 fn test_basic_zip() {
     let data = read_test_archive("basic.zip");
@@ -203,6 +207,10 @@ fn test_potential_bomb_zip() {
     );
 }
 
+// ============================================================================
+// TAR Archive Tests
+// ============================================================================
+
 #[test]
 fn test_plain_tar() {
     let data = read_test_archive("archive.tar");
@@ -327,6 +335,102 @@ fn test_nested_tar_gz() {
     assert!(!nested_files.is_empty(), "Expected to find nested archives");
 }
 
+// ============================================================================
+// 7z Archive Tests
+// ============================================================================
+
+#[test]
+fn test_7z_archive() {
+    let data = read_test_archive("archive.7z");
+    let extractor = ArchiveExtractor::new();
+
+    let files = extractor
+        .extract(&data, ArchiveFormat::SevenZ)
+        .expect("Failed to extract archive.7z");
+
+    assert!(!files.is_empty(), "Expected non-empty archive");
+    assert_contains_file(&files, "hello.txt");
+    assert_contains_file(&files, "test.txt");
+}
+
+// ============================================================================
+// Single-File Decompression Tests
+// ============================================================================
+
+#[test]
+fn test_single_gz_decompression() {
+    let data = read_test_archive("hello.txt.gz");
+    let extractor = ArchiveExtractor::new();
+
+    let files = extractor
+        .extract(&data, ArchiveFormat::Gz)
+        .expect("Failed to decompress hello.txt.gz");
+
+    assert_eq!(files.len(), 1, "Expected single decompressed file");
+    let content = String::from_utf8_lossy(&files[0].data);
+    assert_eq!(content.trim(), "Hello, World!");
+}
+
+#[test]
+fn test_single_bz2_decompression() {
+    let data = read_test_archive("hello.txt.bz2");
+    let extractor = ArchiveExtractor::new();
+
+    let files = extractor
+        .extract(&data, ArchiveFormat::Bz2)
+        .expect("Failed to decompress hello.txt.bz2");
+
+    assert_eq!(files.len(), 1, "Expected single decompressed file");
+    let content = String::from_utf8_lossy(&files[0].data);
+    assert_eq!(content.trim(), "Hello, World!");
+}
+
+#[test]
+fn test_single_xz_decompression() {
+    let data = read_test_archive("hello.txt.xz");
+    let extractor = ArchiveExtractor::new();
+
+    let files = extractor
+        .extract(&data, ArchiveFormat::Xz)
+        .expect("Failed to decompress hello.txt.xz");
+
+    assert_eq!(files.len(), 1, "Expected single decompressed file");
+    let content = String::from_utf8_lossy(&files[0].data);
+    assert_eq!(content.trim(), "Hello, World!");
+}
+
+#[test]
+fn test_single_lz4_decompression() {
+    let data = read_test_archive("hello.txt.lz4");
+    let extractor = ArchiveExtractor::new();
+
+    let files = extractor
+        .extract(&data, ArchiveFormat::Lz4)
+        .expect("Failed to decompress hello.txt.lz4");
+
+    assert_eq!(files.len(), 1, "Expected single decompressed file");
+    let content = String::from_utf8_lossy(&files[0].data);
+    assert_eq!(content.trim(), "Hello, World!");
+}
+
+#[test]
+fn test_single_zst_decompression() {
+    let data = read_test_archive("hello.txt.zst");
+    let extractor = ArchiveExtractor::new();
+
+    let files = extractor
+        .extract(&data, ArchiveFormat::Zst)
+        .expect("Failed to decompress hello.txt.zst");
+
+    assert_eq!(files.len(), 1, "Expected single decompressed file");
+    let content = String::from_utf8_lossy(&files[0].data);
+    assert_eq!(content.trim(), "Hello, World!");
+}
+
+// ============================================================================
+// Content Verification Tests
+// ============================================================================
+
 #[test]
 fn test_verify_file_contents() {
     let data = read_test_archive("basic.zip");
@@ -392,6 +496,10 @@ fn test_large_file_extraction() {
     assert_eq!(large_file.data.len(), 1024 * 1024, "Expected 1MB file");
 }
 
+// ============================================================================
+// Size Limit Tests
+// ============================================================================
+
 #[test]
 fn test_max_file_size_limit() {
     let data = read_test_archive("basic.zip");
@@ -417,6 +525,10 @@ fn test_max_total_size_limit() {
     // Should fail because total is > 1MB
     assert!(result.is_err(), "Expected to hit total size limit");
 }
+
+// ============================================================================
+// Format Consistency Tests
+// ============================================================================
 
 #[test]
 fn test_all_tar_formats_produce_same_structure() {
