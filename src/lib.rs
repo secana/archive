@@ -1,14 +1,13 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! A unified interface for extracting common archive formats in-memory
+//!
+//! This crate provides a simple API for extracting various archive formats
+//! including ZIP, TAR, and compressed TAR files, all in-memory without
+//! touching the disk.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod error;
+pub mod extractor;
+pub mod format;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use error::{ArchiveError, Result};
+pub use extractor::{ArchiveExtractor, ExtractedFile};
+pub use format::ArchiveFormat;
