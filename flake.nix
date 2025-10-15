@@ -410,13 +410,6 @@
               exit 1
           fi
           
-          echo "Publishing version $VERSION..."
-          echo ""
-          
-          # Update the version in the Cargo.toml file
-          echo "Updating Cargo.toml..."
-          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
-          
           # Run tests to make sure everything works
           echo ""
           echo "Running tests..."
@@ -426,6 +419,10 @@
           echo ""
           echo "Building release..."
           cargo build --release
+          
+          # Update the version in the Cargo.toml file
+          echo "Updating Cargo.toml..."
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
           
           # Commit the changes
           echo ""
@@ -445,16 +442,8 @@
           echo "Pushing changes..."
           git push
           
-          # Publish to crates.io
           echo ""
-          echo "Publishing to crates.io..."
-          cargo publish
-          
-          echo ""
-          echo "✅ Successfully published version $VERSION!"
-          echo ""
-          echo "View on crates.io: https://crates.io/crates/archive"
-          echo "Git tag: v$VERSION"
+          echo "✅ Successfully triggered version $VERSION publish!"
         '';
 
         apps = {
