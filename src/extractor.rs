@@ -160,18 +160,18 @@ impl ArchiveExtractor {
     }
 
     fn extract_7z(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
-        use std::io::Seek;
-
         let mut cursor = Cursor::new(data);
         let len = cursor.get_ref().len() as u64;
 
-        let archive = sevenz_rust::SevenZReader::new(&mut cursor, len, "".into())
+        let mut archive = sevenz_rust::SevenZReader::new(&mut cursor, len, "".into())
             .map_err(|e| ArchiveError::InvalidArchive(format!("7z error: {}", e)))?;
 
         let mut files = Vec::new();
         let mut total_size = 0usize;
+        let mut size_error: Option<ArchiveError> = None;
 
-        for entry in archive.archive().files.iter() {
+        // Single-pass extraction: validate sizes and extract contents in one iteration
+        let result = archive.for_each_entries(|entry, reader| {
             if entry.is_directory() {
                 files.push(ExtractedFile {
                     path: entry.name().to_string(),
@@ -181,46 +181,41 @@ impl ArchiveExtractor {
             } else {
                 let size = entry.size() as usize;
                 if size > self.max_file_size {
-                    return Err(ArchiveError::FileTooLarge {
+                    size_error = Some(ArchiveError::FileTooLarge {
                         size,
                         limit: self.max_file_size,
                     });
+                    return Ok(false); // Stop iteration
                 }
 
                 total_size += size;
                 if total_size > self.max_total_size {
-                    return Err(ArchiveError::TotalSizeTooLarge {
+                    size_error = Some(ArchiveError::TotalSizeTooLarge {
                         size: total_size,
                         limit: self.max_total_size,
                     });
+                    return Ok(false); // Stop iteration
                 }
+
+                let mut contents = Vec::new();
+                reader.read_to_end(&mut contents)?;
 
                 files.push(ExtractedFile {
                     path: entry.name().to_string(),
-                    data: Vec::new(), // Placeholder - we'll fill this below
+                    data: contents,
                     is_directory: false,
                 });
             }
+            Ok(true)
+        });
+
+        // Check if we stopped due to size limits
+        if let Some(err) = size_error {
+            return Err(err);
         }
 
-        // Re-read the archive to extract file contents
-        cursor.seek(std::io::SeekFrom::Start(0))?;
-        let mut archive = sevenz_rust::SevenZReader::new(&mut cursor, len, "".into())
-            .map_err(|e| ArchiveError::InvalidArchive(format!("7z error: {}", e)))?;
-
-        archive
-            .for_each_entries(|entry, reader| {
-                if !entry.is_directory() {
-                    // Find the corresponding file in our list
-                    if let Some(file) = files.iter_mut().find(|f| f.path == entry.name()) {
-                        let mut contents = Vec::new();
-                        reader.read_to_end(&mut contents)?;
-                        file.data = contents;
-                    }
-                }
-                Ok(true)
-            })
-            .map_err(|e| ArchiveError::InvalidArchive(format!("7z extraction error: {}", e)))?;
+        // Check for other extraction errors
+        result.map_err(|e| ArchiveError::InvalidArchive(format!("7z extraction error: {}", e)))?;
 
         Ok(files)
     }

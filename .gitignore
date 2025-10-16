@@ -23,7 +23,6 @@ result-*
 
 # Rust build artifacts
 target/
-Cargo.lock
 
 # IDE
 .vscode/
