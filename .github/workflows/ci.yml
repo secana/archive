@@ -36,6 +36,14 @@ jobs:
       - name: Run tests
         run: nix develop --command cargo test
 
+      - name: Run doc tests
+        run: nix develop --command cargo test --doc
+
+      - name: Check documentation
+        run: nix develop --command cargo doc --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
   publish:
     name: Publish to crates.io
     runs-on: ubuntu-latest

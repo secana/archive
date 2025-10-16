@@ -1,21 +1,132 @@
-//! Archive extraction implementations
+//! Archive extraction implementations.
+//!
+//! This module provides the core extraction functionality for all supported
+//! archive formats. The main entry point is [`ArchiveExtractor`], which can
+//! extract files from any supported format into memory.
 
 use crate::error::{ArchiveError, Result};
 use crate::format::ArchiveFormat;
 use std::io::{Cursor, Read};
 
-/// Represents a file extracted from an archive
+/// Represents a single file extracted from an archive.
+///
+/// This structure contains the file's path within the archive, its contents,
+/// and metadata about whether it represents a directory.
+///
+/// # Examples
+///
+/// ```no_run
+/// use archive::{ArchiveExtractor, ArchiveFormat};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let extractor = ArchiveExtractor::new();
+/// # let data = vec![0u8; 100];
+/// let files = extractor.extract(&data, ArchiveFormat::Zip)?;
+///
+/// for file in files {
+///     if file.is_directory {
+///         println!("Directory: {}", file.path);
+///     } else {
+///         println!("File: {} ({} bytes)", file.path, file.data.len());
+///         // Process file.data as needed
+///     }
+/// }
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct ExtractedFile {
-    /// Original path in the archive
+    /// The original path of the file within the archive.
+    ///
+    /// For multi-file archives (ZIP, TAR, 7-Zip), this is the path as stored
+    /// in the archive. For single-file compression formats:
+    /// - **Gzip**: The original filename from the header, or "data" if not present
+    /// - **Bzip2, XZ, LZ4, Zstandard**: Always "data" as these formats don't store filenames
     pub path: String,
-    /// File contents
+
+    /// The decompressed contents of the file.
+    ///
+    /// For directories, this will be an empty vector.
     pub data: Vec<u8>,
-    /// Whether this is a directory
+
+    /// Whether this entry represents a directory.
+    ///
+    /// If `true`, the `data` field will be empty and `path` represents a directory.
+    /// If `false`, this is a regular file with content in `data`.
     pub is_directory: bool,
 }
 
-/// Main extractor that handles all archive formats
+/// Main extractor that handles all archive formats.
+///
+/// This is the primary interface for extracting archives. It supports all formats
+/// defined in [`ArchiveFormat`] and provides configurable safety limits to protect
+/// against malicious archives.
+///
+/// # Safety Features
+///
+/// The extractor includes built-in protections against:
+/// - **Zip bombs**: Files that expand to enormous sizes
+/// - **Resource exhaustion**: Configurable per-file and total size limits
+/// - **Memory exhaustion**: All limits are checked before allocation
+///
+/// # Default Limits
+///
+/// - Maximum file size: 100 MB
+/// - Maximum total extraction size: 1 GB
+///
+/// # Examples
+///
+/// ## Basic extraction
+///
+/// ```no_run
+/// use archive::{ArchiveExtractor, ArchiveFormat};
+/// use std::fs;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let data = fs::read("archive.zip")?;
+/// let extractor = ArchiveExtractor::new();
+/// let files = extractor.extract(&data, ArchiveFormat::Zip)?;
+///
+/// println!("Extracted {} files", files.len());
+/// # Ok(())
+/// # }
+/// ```
+///
+/// ## Custom size limits
+///
+/// ```no_run
+/// use archive::{ArchiveExtractor, ArchiveFormat};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let extractor = ArchiveExtractor::new()
+///     .with_max_file_size(10 * 1024 * 1024)     // 10 MB per file
+///     .with_max_total_size(100 * 1024 * 1024);  // 100 MB total
+///
+/// # let data = vec![0u8; 100];
+/// let files = extractor.extract(&data, ArchiveFormat::TarGz)?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// ## Handling different formats
+///
+/// ```no_run
+/// use archive::{ArchiveExtractor, ArchiveFormat};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let extractor = ArchiveExtractor::new();
+///
+/// // Extract different archive types
+/// # let zip_data = vec![0u8; 100];
+/// let zip_files = extractor.extract(&zip_data, ArchiveFormat::Zip)?;
+/// # let tar_data = vec![0u8; 100];
+/// let tar_files = extractor.extract(&tar_data, ArchiveFormat::TarGz)?;
+/// # let sevenz_data = vec![0u8; 100];
+/// let sevenz_files = extractor.extract(&sevenz_data, ArchiveFormat::SevenZ)?;
+///
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct ArchiveExtractor {
     max_file_size: usize,
@@ -32,24 +143,174 @@ impl Default for ArchiveExtractor {
 }
 
 impl ArchiveExtractor {
-    /// Create a new archive extractor with default settings
+    /// Creates a new archive extractor with default settings.
+    ///
+    /// Default settings:
+    /// - Maximum file size: 100 MB (104,857,600 bytes)
+    /// - Maximum total extraction size: 1 GB (1,073,741,824 bytes)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use archive::ArchiveExtractor;
+    ///
+    /// let extractor = ArchiveExtractor::new();
+    /// ```
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Set maximum file size (in bytes)
+    /// Sets the maximum size for individual files in the archive.
+    ///
+    /// This limit protects against extracting unexpectedly large files that could
+    /// exhaust memory. If any file in the archive exceeds this size, extraction
+    /// will fail with [`ArchiveError::FileTooLarge`].
+    ///
+    /// This method uses the builder pattern, allowing you to chain configuration calls.
+    ///
+    /// # Arguments
+    ///
+    /// * `size` - Maximum file size in bytes
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use archive::ArchiveExtractor;
+    ///
+    /// // Allow up to 50 MB per file
+    /// let extractor = ArchiveExtractor::new()
+    ///     .with_max_file_size(50 * 1024 * 1024);
+    /// ```
     pub fn with_max_file_size(mut self, size: usize) -> Self {
         self.max_file_size = size;
         self
     }
 
-    /// Set maximum total extraction size (in bytes)
+    /// Sets the maximum total size for all extracted files combined.
+    ///
+    /// This limit protects against zip bombs and archives with many files that
+    /// could collectively exhaust memory. If the total size of all files would
+    /// exceed this limit, extraction will fail with [`ArchiveError::TotalSizeTooLarge`].
+    ///
+    /// This method uses the builder pattern, allowing you to chain configuration calls.
+    ///
+    /// # Arguments
+    ///
+    /// * `size` - Maximum total extraction size in bytes
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use archive::ArchiveExtractor;
+    ///
+    /// // Allow up to 500 MB total extraction
+    /// let extractor = ArchiveExtractor::new()
+    ///     .with_max_total_size(500 * 1024 * 1024);
+    /// ```
+    ///
+    /// # Combined with other limits
+    ///
+    /// ```
+    /// use archive::ArchiveExtractor;
+    ///
+    /// let extractor = ArchiveExtractor::new()
+    ///     .with_max_file_size(10 * 1024 * 1024)    // 10 MB per file
+    ///     .with_max_total_size(100 * 1024 * 1024); // 100 MB total
+    /// ```
     pub fn with_max_total_size(mut self, size: usize) -> Self {
         self.max_total_size = size;
         self
     }
 
-    /// Extract an archive based on its format
+    /// Extracts all files from an archive.
+    ///
+    /// This is the main extraction method that handles all supported archive formats.
+    /// The format must be explicitly specified via the `format` parameter.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - The raw bytes of the archive file
+    /// * `format` - The archive format to extract (see [`ArchiveFormat`])
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Vec<ExtractedFile>` containing all files and directories from the archive.
+    /// Directories will have `is_directory` set to `true` and an empty `data` field.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The archive data is invalid or corrupted ([`ArchiveError::InvalidArchive`])
+    /// - Any file exceeds the maximum file size ([`ArchiveError::FileTooLarge`])
+    /// - The total extracted size exceeds the limit ([`ArchiveError::TotalSizeTooLarge`])
+    /// - An I/O error occurs during extraction ([`ArchiveError::Io`])
+    /// - A ZIP-specific error occurs ([`ArchiveError::Zip`])
+    ///
+    /// # Examples
+    ///
+    /// ## Extract a ZIP file
+    ///
+    /// ```no_run
+    /// use archive::{ArchiveExtractor, ArchiveFormat};
+    /// use std::fs;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let data = fs::read("example.zip")?;
+    /// let extractor = ArchiveExtractor::new();
+    /// let files = extractor.extract(&data, ArchiveFormat::Zip)?;
+    ///
+    /// for file in files {
+    ///     println!("{}: {} bytes", file.path, file.data.len());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// ## Handle extraction errors
+    ///
+    /// ```no_run
+    /// use archive::{ArchiveExtractor, ArchiveFormat, ArchiveError};
+    ///
+    /// # fn main() {
+    /// let extractor = ArchiveExtractor::new()
+    ///     .with_max_file_size(1024 * 1024); // 1 MB limit
+    ///
+    /// # let data = vec![0u8; 100];
+    /// match extractor.extract(&data, ArchiveFormat::Zip) {
+    ///     Ok(files) => {
+    ///         println!("Successfully extracted {} files", files.len());
+    ///     }
+    ///     Err(ArchiveError::FileTooLarge { size, limit }) => {
+    ///         eprintln!("File too large: {} bytes (limit: {} bytes)", size, limit);
+    ///     }
+    ///     Err(ArchiveError::InvalidArchive(msg)) => {
+    ///         eprintln!("Invalid archive: {}", msg);
+    ///     }
+    ///     Err(e) => {
+    ///         eprintln!("Extraction failed: {}", e);
+    ///     }
+    /// }
+    /// # }
+    /// ```
+    ///
+    /// ## Extract multiple formats
+    ///
+    /// ```no_run
+    /// use archive::{ArchiveExtractor, ArchiveFormat};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let extractor = ArchiveExtractor::new();
+    ///
+    /// # let zip_data = vec![0u8; 100];
+    /// let zip_files = extractor.extract(&zip_data, ArchiveFormat::Zip)?;
+    /// # let tar_data = vec![0u8; 100];
+    /// let tar_files = extractor.extract(&tar_data, ArchiveFormat::TarGz)?;
+    /// # let gz_data = vec![0u8; 100];
+    /// let gz_files = extractor.extract(&gz_data, ArchiveFormat::Gz)?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn extract(&self, data: &[u8], format: ArchiveFormat) -> Result<Vec<ExtractedFile>> {
         match format {
             ArchiveFormat::Zip => self.extract_zip(data),
@@ -235,8 +496,16 @@ impl ArchiveExtractor {
             });
         }
 
+        // Try to extract original filename from gzip header
+        let path = decoder
+            .header()
+            .and_then(|h| h.filename())
+            .and_then(|f| std::str::from_utf8(f).ok())
+            .unwrap_or("data")
+            .to_string();
+
         Ok(vec![ExtractedFile {
-            path: "decompressed".to_string(),
+            path,
             data: decompressed,
             is_directory: false,
         }])
@@ -256,7 +525,7 @@ impl ArchiveExtractor {
         }
 
         Ok(vec![ExtractedFile {
-            path: "decompressed".to_string(),
+            path: "data".to_string(),
             data: decompressed,
             is_directory: false,
         }])
@@ -276,7 +545,7 @@ impl ArchiveExtractor {
         }
 
         Ok(vec![ExtractedFile {
-            path: "decompressed".to_string(),
+            path: "data".to_string(),
             data: decompressed,
             is_directory: false,
         }])
@@ -296,7 +565,7 @@ impl ArchiveExtractor {
         }
 
         Ok(vec![ExtractedFile {
-            path: "decompressed".to_string(),
+            path: "data".to_string(),
             data: decompressed,
             is_directory: false,
         }])
@@ -316,7 +585,7 @@ impl ArchiveExtractor {
         }
 
         Ok(vec![ExtractedFile {
-            path: "decompressed".to_string(),
+            path: "data".to_string(),
             data: decompressed,
             is_directory: false,
         }])
