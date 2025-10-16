@@ -25,18 +25,18 @@
             p7zip
             lzip
             lz4
-            
+
             # Additional utilities
             tree        # For viewing directory structure
             file        # For file type identification
             coreutils   # For basic file operations
-            
+
             # Rust development tools
             rustc
             cargo
             rustfmt
             clippy
-            
+
             # Git for version control
             git
           ];
@@ -60,7 +60,7 @@
 
         packages.generate-archives = pkgs.writeShellScriptBin "generate-test-archives" ''
           set -e
-          
+
           # Add all required tools to PATH
           export PATH="${pkgs.lib.makeBinPath [
             pkgs.zip
@@ -77,189 +77,189 @@
             pkgs.file
             pkgs.coreutils
           ]}:$PATH"
-          
+
           SCRIPT_DIR="$(cd "$(dirname "''${BASH_SOURCE[0]}")" && pwd)"
           TEST_DIR="''${1:-test-archives}"
-          
+
           echo "Creating test archives in: $TEST_DIR"
           mkdir -p "$TEST_DIR"
           cd "$TEST_DIR"
-          
+
           # Create test data directory structure
           echo "Creating test data..."
           mkdir -p test-data/{empty-dir,nested/deep/path}
-          
+
           # Create various test files
           echo "Hello, World!" > test-data/hello.txt
           echo "This is a test file" > test-data/test.txt
           dd if=/dev/urandom of=test-data/binary.bin bs=1024 count=10 2>/dev/null
           echo "Nested file content" > test-data/nested/file.txt
           echo "Deep nested content" > test-data/nested/deep/path/deep-file.txt
-          
+
           # Create a larger file for compression testing
           dd if=/dev/urandom of=test-data/large-file.bin bs=1M count=1 2>/dev/null
-          
+
           echo ""
           echo "=== Creating ZIP archives ==="
-          
+
           # Basic ZIP
           echo "Creating: basic.zip"
           zip -r basic.zip test-data/ >/dev/null
-          
+
           # ZIP with different compression levels
           echo "Creating: no-compression.zip (store only)"
           zip -r -0 no-compression.zip test-data/ >/dev/null
-          
+
           echo "Creating: max-compression.zip"
           zip -r -9 max-compression.zip test-data/ >/dev/null
-          
+
           # ZIP with password (for testing encrypted archives)
           echo "Creating: encrypted.zip (password: test123)"
           zip -r -P test123 encrypted.zip test-data/ >/dev/null
-          
+
           echo ""
           echo "=== Creating TAR archives ==="
-          
+
           # Plain TAR
           echo "Creating: archive.tar"
           tar -cf archive.tar test-data/
-          
+
           echo ""
           echo "=== Creating TAR.GZ archives ==="
-          
+
           # TAR.GZ (gzip)
           echo "Creating: archive.tar.gz"
           tar -czf archive.tar.gz test-data/
-          
+
           # Alternative naming
           echo "Creating: archive.tgz"
           tar -czf archive.tgz test-data/
-          
+
           echo ""
           echo "=== Creating TAR.BZ2 archives ==="
-          
+
           # TAR.BZ2 (bzip2)
           echo "Creating: archive.tar.bz2"
           tar -cjf archive.tar.bz2 test-data/
-          
+
           # Alternative naming
           echo "Creating: archive.tbz2"
           tar -cjf archive.tbz2 test-data/
-          
+
           echo ""
           echo "=== Creating TAR.XZ archives ==="
-          
+
           # TAR.XZ (xz)
           echo "Creating: archive.tar.xz"
           tar -cJf archive.tar.xz test-data/
-          
+
           # Alternative naming
           echo "Creating: archive.txz"
           tar -cJf archive.txz test-data/
-          
+
           echo ""
           echo "=== Creating TAR.ZST archives ==="
-          
+
           # TAR.ZST (zstd)
           echo "Creating: archive.tar.zst"
           tar -c test-data/ | zstd -q -o archive.tar.zst
-          
+
           echo ""
           echo "=== Creating compressed single files ==="
-          
+
           # GZIP single file
           echo "Creating: hello.txt.gz"
           gzip -c test-data/hello.txt > hello.txt.gz
-          
+
           # BZIP2 single file
           echo "Creating: hello.txt.bz2"
           bzip2 -c test-data/hello.txt > hello.txt.bz2
-          
+
           # XZ single file
           echo "Creating: hello.txt.xz"
           xz -c test-data/hello.txt > hello.txt.xz
-          
+
           # ZSTD single file
           echo "Creating: hello.txt.zst"
           zstd -q test-data/hello.txt -o hello.txt.zst
-          
+
           # LZ4 single file
           echo "Creating: hello.txt.lz4"
           lz4 -q test-data/hello.txt hello.txt.lz4
-          
+
           echo ""
           echo "=== Creating 7z archives ==="
-          
+
           # 7z archive
           echo "Creating: archive.7z"
           7z a -bd archive.7z test-data/ >/dev/null
-          
+
           echo ""
           echo "=== Creating nested archives ==="
-          
+
           # Create a nested archive structure
           mkdir -p nested-test
           cp basic.zip nested-test/
           cp archive.tar.gz nested-test/
-          
+
           echo "Creating: nested.zip (contains other archives)"
           zip -r nested.zip nested-test/ >/dev/null
-          
+
           echo "Creating: nested.tar.gz (contains other archives)"
           tar -czf nested.tar.gz nested-test/
-          
+
           # Deep nesting (3 levels)
           mkdir -p level3
           echo "Level 3 content" > level3/level3.txt
           zip -r level3.zip level3/ >/dev/null
-          
+
           mkdir -p level2
           cp level3.zip level2/
           echo "Level 2 content" > level2/level2.txt
           zip -r level2.zip level2/ >/dev/null
-          
+
           mkdir -p level1
           cp level2.zip level1/
           echo "Level 1 content" > level1/level1.txt
           echo "Creating: deeply-nested.zip (3 levels deep)"
           zip -r deeply-nested.zip level1/ >/dev/null
-          
+
           echo ""
           echo "=== Creating edge case archives ==="
-          
+
           # Empty archive - create a proper empty ZIP file
           echo "Creating: empty.zip"
           touch .empty_placeholder
           zip empty.zip .empty_placeholder >/dev/null
           zip -d empty.zip .empty_placeholder >/dev/null
           rm .empty_placeholder
-          
+
           # Archive with only empty directories
           mkdir -p empty-dirs/{dir1,dir2/subdir}
           echo "Creating: empty-dirs.zip"
           zip -r empty-dirs.zip empty-dirs/ >/dev/null
-          
+
           # Archive with special characters in names
           mkdir -p special-chars
           echo "test" > "special-chars/file with spaces.txt"
           echo "test" > "special-chars/file-with-ümlaut.txt"
           echo "Creating: special-chars.zip"
           zip -r special-chars.zip special-chars/ >/dev/null
-          
+
           # Large file for bomb detection testing
           echo "Creating: potential-bomb.zip (highly compressible)"
           dd if=/dev/zero of=zeros.bin bs=1M count=10 2>/dev/null
           zip -9 potential-bomb.zip zeros.bin >/dev/null
-          
+
           echo ""
           echo "=== Cleaning up temporary directories ==="
           rm -rf test-data nested-test level1 level2 level3 empty-dirs special-chars zeros.bin
-          
+
           echo ""
           echo "=== Test Archive Summary ==="
           echo "Created archives:"
           tree -h -L 1 --filesfirst
-          
+
           echo ""
           echo "=== Creating manifest ==="
           cat > MANIFEST.md << 'EOF'
@@ -339,9 +339,9 @@
           nix run .#generateTestArchives -- /path/to/output
           \`\`\`
           EOF
-          
+
           echo "Created MANIFEST.md"
-          
+
           echo ""
           echo "✅ All test archives created successfully!"
           echo ""
@@ -356,7 +356,7 @@
 
         packages.publish = pkgs.writeShellScriptBin "publish-crate" ''
           set -e
-          
+
           # Add required tools to PATH
           export PATH="${pkgs.lib.makeBinPath [
             pkgs.git
@@ -365,9 +365,9 @@
             pkgs.gnugrep
             pkgs.coreutils
           ]}:$PATH"
-          
+
           VERSION="$1"
-          
+
           # Check if the version was provided
           if [ -z "$VERSION" ]; then
               echo "Error: No version provided"
@@ -375,21 +375,21 @@
               echo "Example: nix run .#publish 0.1.0"
               exit 1
           fi
-          
+
           # Check if the version is valid
           if ! echo "$VERSION" | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+$"; then
               echo "Error: Invalid version"
               echo "Version must be in the format X.Y.Z"
               exit 1
           fi
-          
+
           # Check if on main branch
           CURRENT_BRANCH=$(git branch --show-current)
           if [ "$CURRENT_BRANCH" != "main" ]; then
               echo "Error: Not on main branch (currently on: $CURRENT_BRANCH)"
               exit 1
           fi
-          
+
           # Check if working directory is clean
           if [ -n "$(git status --porcelain)" ]; then
               echo "Error: Working directory is not clean"
@@ -397,51 +397,56 @@
               git status --short
               exit 1
           fi
-          
+
           # Check if the version is already in the Cargo.toml file
           if grep -qE "^version = \"$VERSION\"" Cargo.toml; then
               echo "Error: Version $VERSION is already in Cargo.toml"
               exit 1
           fi
-          
+
           # Check if tag already exists
           if git rev-parse "v$VERSION" >/dev/null 2>&1; then
               echo "Error: Tag v$VERSION already exists"
               exit 1
           fi
-          
+
           # Run tests to make sure everything works
           echo ""
           echo "Running tests..."
           cargo test
-          
-          # Build to ensure it compiles
+
+          # Run docs tests
           echo ""
-          echo "Building release..."
-          cargo build --release
-          
+          echo "Running docs tests..."
+          cargo test --doc
+
           # Update the version in the Cargo.toml file
           echo "Updating Cargo.toml..."
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
-          
+
+          # Build to update Cargo.lock
+          echo ""
+          echo "Building..."
+          cargo build --release
+
           # Commit the changes
           echo ""
           echo "Committing changes..."
           git add Cargo.toml Cargo.lock
           git commit -m "Release version $VERSION"
-          
-          # Tag the commit
-          echo "Creating tag v$VERSION..."
-          git tag "v$VERSION"
-          
-          # Push the tag
-          echo "Pushing tag..."
-          git push origin "v$VERSION"
-          
+
           # Push the changes
           echo "Pushing changes..."
           git push
-          
+
+          # Tag the commit
+          echo "Creating tag v$VERSION..."
+          git tag "v$VERSION"
+
+          # Push the tag
+          echo "Pushing tag..."
+          git push origin "v$VERSION"
+
           echo ""
           echo "✅ Successfully triggered version $VERSION publish!"
         '';
@@ -451,12 +456,12 @@
             type = "app";
             program = "${self.packages.${system}.generate-archives}/bin/generate-test-archives";
           };
-          
+
           generateTestArchives = {
             type = "app";
             program = "${self.packages.${system}.generate-archives}/bin/generate-test-archives";
           };
-          
+
           publish = {
             type = "app";
             program = "${self.packages.${system}.publish}/bin/publish-crate";
