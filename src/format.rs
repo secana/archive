@@ -2,6 +2,10 @@
 //!
 //! This module defines the supported archive and compression formats.
 
+use mime_type::MimeType;
+
+use crate::ArchiveError;
+
 /// Supported archive and compression formats.
 ///
 /// This enum represents all archive and compression formats that can be extracted
@@ -146,5 +150,80 @@ impl ArchiveFormat {
             Self::Zst => "ZSTD",
             Self::SevenZ => "7Z",
         }
+    }
+
+    /// Checks if a given MIME type corresponds to a supported archive format.
+    ///
+    /// This method attempts to convert the provided MIME type into an
+    /// `ArchiveFormat`. If the conversion is successful, it indicates that
+    /// the MIME type is supported.
+    ///
+    /// # Examples
+    /// ```
+    /// use archive::{ArchiveFormat};
+    /// use mime_type::{MimeType, MimeFormat, Application};
+    ///
+    /// let mime_zip = MimeType::Archive(mime_type::Archive::Zip);
+    /// let mime_gz = MimeType::Archive(mime_type::Archive::Gz);
+    /// let mime_unknown = MimeType::from_mime("application/octet-stream").unwrap();
+    ///
+    /// assert!(ArchiveFormat::is_supported_mime(&mime_zip));
+    /// assert!(ArchiveFormat::is_supported_mime(&mime_gz));
+    /// assert!(!ArchiveFormat::is_supported_mime(&mime_unknown));
+    /// ```
+    pub fn is_supported_mime(mime: &MimeType) -> bool {
+        ArchiveFormat::try_from(mime).is_ok()
+    }
+}
+
+impl TryFrom<&MimeType> for ArchiveFormat {
+    type Error = ArchiveError;
+
+    fn try_from(mime: &MimeType) -> Result<Self, Self::Error> {
+        match mime {
+            MimeType::Archive(mime_type::Archive::Zip) => Ok(Self::Zip),
+            MimeType::Archive(mime_type::Archive::Tar) => Ok(Self::Tar),
+            MimeType::Archive(mime_type::Archive::Gz) => Ok(Self::Gz),
+            MimeType::Archive(mime_type::Archive::Bz2) => Ok(Self::Bz2),
+            MimeType::Archive(mime_type::Archive::Xz) => Ok(Self::Xz),
+            MimeType::Archive(mime_type::Archive::Lz4) => Ok(Self::Lz4),
+            MimeType::Archive(mime_type::Archive::Zst) => Ok(Self::Zst),
+            MimeType::Archive(mime_type::Archive::SevenZ) => Ok(Self::SevenZ),
+            _ => Err(ArchiveError::UnsupportedFormat(mime.to_string())),
+        }
+    }
+}
+
+impl TryFrom<MimeType> for ArchiveFormat {
+    type Error = ArchiveError;
+
+    fn try_from(mime: MimeType) -> Result<Self, Self::Error> {
+        ArchiveFormat::try_from(&mime)
+    }
+}
+
+impl From<&ArchiveFormat> for MimeType {
+    fn from(format: &ArchiveFormat) -> Self {
+        match format {
+            ArchiveFormat::Zip => MimeType::Archive(mime_type::Archive::Zip),
+            ArchiveFormat::Tar => MimeType::Archive(mime_type::Archive::Tar),
+            ArchiveFormat::Gz => MimeType::Archive(mime_type::Archive::Gz),
+            ArchiveFormat::Bz2 => MimeType::Archive(mime_type::Archive::Bz2),
+            ArchiveFormat::Xz => MimeType::Archive(mime_type::Archive::Xz),
+            ArchiveFormat::Lz4 => MimeType::Archive(mime_type::Archive::Lz4),
+            ArchiveFormat::Zst => MimeType::Archive(mime_type::Archive::Zst),
+            ArchiveFormat::SevenZ => MimeType::Archive(mime_type::Archive::SevenZ),
+            ArchiveFormat::TarGz => MimeType::Archive(mime_type::Archive::Gz),
+            ArchiveFormat::TarBz2 => MimeType::Archive(mime_type::Archive::Bz2),
+            ArchiveFormat::TarXz => MimeType::Archive(mime_type::Archive::Xz),
+            ArchiveFormat::TarZst => MimeType::Archive(mime_type::Archive::Zst),
+            ArchiveFormat::TarLz4 => MimeType::Archive(mime_type::Archive::Lz4),
+        }
+    }
+}
+
+impl From<ArchiveFormat> for MimeType {
+    fn from(format: ArchiveFormat) -> Self {
+        MimeType::from(&format)
     }
 }

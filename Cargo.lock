@@ -25,6 +25,7 @@ dependencies = [
  "flate2",
  "lz4",
  "lzma-rs",
+ "mime-type",
  "sevenz-rust",
  "tar",
  "thiserror",
@@ -390,6 +391,12 @@ name = "memchr"
 version = "2.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
+
+[[package]]
+name = "mime-type"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c84518c37edb6b8bd3d9b429793f99a88650e335cd5db09b708b04f5dc2e67f"
 
 [[package]]
 name = "miniz_oxide"

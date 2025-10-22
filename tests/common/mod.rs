@@ -18,6 +18,7 @@ pub fn read_test_archive(filename: &str) -> Vec<u8> {
 }
 
 /// Helper to check if extracted files contain expected content
+#[allow(dead_code)]
 pub fn assert_contains_file<'a>(
     files: &'a [ExtractedFile],
     path_contains: &str,
