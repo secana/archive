@@ -19,6 +19,7 @@
             unzip
             gzip
             bzip2
+            ar
             xz
             zstd
             gnutar
@@ -45,6 +46,7 @@
             echo "Archive creation environment loaded!"
             echo "Available tools:"
             echo "  - zip/unzip"
+            echo "  - ar"
             echo "  - gzip/gunzip"
             echo "  - bzip2/bunzip2"
             echo "  - xz/unxz"
@@ -123,6 +125,13 @@
           # Plain TAR
           echo "Creating: archive.tar"
           tar -cf archive.tar test-data/
+
+          echo ""
+          echo "=== Creating TAR archives ==="
+
+          # AR (Unix Archive, can only store files and not directories)
+          echo "Creating: archive.ar"
+          ar rc archive.ar $(find test-data -type f)
 
           echo ""
           echo "=== Creating TAR.GZ archives ==="
