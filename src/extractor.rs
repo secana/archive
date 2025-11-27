@@ -315,6 +315,7 @@ impl ArchiveExtractor {
         match format {
             ArchiveFormat::Zip => self.extract_zip(data),
             ArchiveFormat::Tar => self.extract_tar(data),
+            ArchiveFormat::Ar => self.extract_ar(data),
             ArchiveFormat::TarGz => self.extract_tar_gz(data),
             ArchiveFormat::TarBz2 => self.extract_tar_bz2(data),
             ArchiveFormat::TarXz => self.extract_tar_xz(data),
@@ -380,6 +381,12 @@ impl ArchiveExtractor {
         let cursor = Cursor::new(data);
         let mut archive = tar::Archive::new(cursor);
         self.process_tar_entries(&mut archive)
+    }
+
+    fn extract_ar(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+        let cursor = Cursor::new(data);
+        let mut archive = ar::Archive::new(cursor);
+        self.process_ar_entries(&mut archive)
     }
 
     fn extract_tar_gz(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
@@ -598,8 +605,8 @@ impl ArchiveExtractor {
         let mut files = Vec::new();
         let mut total_size = 0usize;
 
-        for entry in archive.entries()? {
-            let mut entry = entry?;
+        for entry_result in archive.entries()? {
+            let mut entry = entry_result?;
             let path = entry.path()?.to_string_lossy().to_string();
             let is_directory = entry.header().entry_type().is_dir();
 
@@ -635,6 +642,46 @@ impl ArchiveExtractor {
                     is_directory,
                 });
             }
+        }
+
+        Ok(files)
+    }
+
+    fn process_ar_entries<R: Read>(
+        &self,
+        archive: &mut ar::Archive<R>,
+    ) -> Result<Vec<ExtractedFile>> {
+        let mut files = Vec::new();
+        let mut total_size = 0usize;
+
+        while let Some(entry_result) = archive.next_entry(){
+            let mut entry = entry_result?;
+            let path = String::from_utf8_lossy(entry.header().identifier()).to_string();
+
+            let size = entry.header().size() as usize;
+            if size > self.max_file_size {
+                return Err(ArchiveError::FileTooLarge {
+                    size,
+                    limit: self.max_file_size,
+                });
+            }
+
+            total_size += size;
+            if total_size > self.max_total_size {
+                return Err(ArchiveError::TotalSizeTooLarge {
+                    size: total_size,
+                    limit: self.max_total_size,
+                });
+            }
+
+            let mut contents = Vec::new();
+            entry.read_to_end(&mut contents)?;
+
+            files.push(ExtractedFile {
+                path,
+                data: contents,
+                is_directory: false,
+            });
         }
 
         Ok(files)
