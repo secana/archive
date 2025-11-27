@@ -23,6 +23,8 @@ A unified, pure-Rust interface for extracting common archive formats in-memory.
 |--------|------------|-------------|
 | **ZIP** | `.zip` | ZIP archives with various compression levels |
 | **TAR** | `.tar` | Uncompressed TAR archives |
+| **AR** | `.ar` | Uncompressed AR archives |
+| **DEB** | `.deb` | Debian packages (which are also AR archives) |
 | **TAR.GZ** | `.tar.gz`, `.tgz` | TAR with gzip compression |
 | **TAR.BZ2** | `.tar.bz2`, `.tbz2` | TAR with bzip2 compression |
 | **TAR.XZ** | `.tar.xz`, `.txz` | TAR with xz/LZMA compression |
