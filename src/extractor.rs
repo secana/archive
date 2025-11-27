@@ -316,6 +316,7 @@ impl ArchiveExtractor {
             ArchiveFormat::Zip => self.extract_zip(data),
             ArchiveFormat::Tar => self.extract_tar(data),
             ArchiveFormat::Ar => self.extract_ar(data),
+            ArchiveFormat::Deb => self.extract_deb(data),
             ArchiveFormat::TarGz => self.extract_tar_gz(data),
             ArchiveFormat::TarBz2 => self.extract_tar_bz2(data),
             ArchiveFormat::TarXz => self.extract_tar_xz(data),
@@ -384,6 +385,12 @@ impl ArchiveExtractor {
     }
 
     fn extract_ar(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+        let cursor = Cursor::new(data);
+        let mut archive = ar::Archive::new(cursor);
+        self.process_ar_entries(&mut archive)
+    }
+
+    fn extract_deb(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
         let cursor = Cursor::new(data);
         let mut archive = ar::Archive::new(cursor);
         self.process_ar_entries(&mut archive)

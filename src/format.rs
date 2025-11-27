@@ -59,6 +59,13 @@ pub enum ArchiveFormat {
     /// there are multiple variants of the format.
     Ar,
 
+    /// Debian package (`.deb`).
+    ///
+    /// Debian packages are a file format used by the Debian package management
+    /// system. They are based on the ar archive format and contain metadata
+    /// about the package, as well as the actual files to be installed.
+    Deb,
+
     /// TAR archive with gzip compression (`.tar.gz`, `.tgz`).
     ///
     /// Combines TAR archiving with gzip compression. This is one of the most
@@ -147,6 +154,7 @@ impl ArchiveFormat {
             Self::Zip => "ZIP",
             Self::Tar => "TAR",
             Self::Ar => "AR",
+            Self::Deb => "DEB",
             Self::TarGz => "TAR.GZ",
             Self::TarBz2 => "TAR.BZ2",
             Self::TarXz => "TAR.XZ",
@@ -193,6 +201,7 @@ impl TryFrom<&MimeType> for ArchiveFormat {
             MimeType::Archive(mime_type::Archive::Zip) => Ok(Self::Zip),
             MimeType::Archive(mime_type::Archive::Tar) => Ok(Self::Tar),
             MimeType::Archive(mime_type::Archive::Ar) => Ok(Self::Ar),
+            MimeType::Archive(mime_type::Archive::Deb) => Ok(Self::Deb),
             MimeType::Archive(mime_type::Archive::Gz) => Ok(Self::Gz),
             MimeType::Archive(mime_type::Archive::Bz2) => Ok(Self::Bz2),
             MimeType::Archive(mime_type::Archive::Xz) => Ok(Self::Xz),
@@ -218,6 +227,7 @@ impl From<&ArchiveFormat> for MimeType {
             ArchiveFormat::Zip => MimeType::Archive(mime_type::Archive::Zip),
             ArchiveFormat::Tar => MimeType::Archive(mime_type::Archive::Tar),
             ArchiveFormat::Ar => MimeType::Archive(mime_type::Archive::Ar),
+            ArchiveFormat::Deb => MimeType::Archive(mime_type::Archive::Deb),
             ArchiveFormat::Gz => MimeType::Archive(mime_type::Archive::Gz),
             ArchiveFormat::Bz2 => MimeType::Archive(mime_type::Archive::Bz2),
             ArchiveFormat::Xz => MimeType::Archive(mime_type::Archive::Xz),
