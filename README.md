@@ -40,20 +40,3 @@ nix run .#generateTestArchives
 
 cargo test
 ```
-
-## Publish new version
-
-To publish a new version of the crate, checkout the `main` branch and run:
-
-```sh
-nix run .#publish <version>
-
-# Example
-nix run .#publish 0.4.0
-```
-
-This will:
-- Update the version in `Cargo.toml` and `Cargo.lock`
-- Run tests and build the documentation
-- Create a git tag for the new version
-- Trigger a GitHub Actions workflow to publish the crate to crates.io 
