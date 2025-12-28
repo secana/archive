@@ -6,8 +6,14 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ] (system:
+  outputs =
+    { self
+    , nixpkgs
+    , flake-utils
+    ,
+    }:
+    flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ] (
+      system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
       in
@@ -19,7 +25,6 @@
             unzip
             gzip
             bzip2
-            ar
             xz
             zstd
             gnutar
@@ -28,9 +33,9 @@
             lz4
 
             # Additional utilities
-            tree        # For viewing directory structure
-            file        # For file type identification
-            coreutils   # For basic file operations
+            tree # For viewing directory structure
+            file # For file type identification
+            coreutils # For basic file operations
 
             # Rust development tools
             rustc
@@ -46,7 +51,6 @@
             echo "Archive creation environment loaded!"
             echo "Available tools:"
             echo "  - zip/unzip"
-            echo "  - ar"
             echo "  - gzip/gunzip"
             echo "  - bzip2/bunzip2"
             echo "  - xz/unxz"
@@ -56,7 +60,6 @@
             echo "  - lzip/lz4"
             echo ""
             echo "Run 'nix run .#generateTestArchives' to create all test archives"
-            echo "Run 'nix run .#publish <version>' to publish a new version to crates.io"
           '';
         };
 
@@ -64,21 +67,23 @@
           set -e
 
           # Add all required tools to PATH
-          export PATH="${pkgs.lib.makeBinPath [
-            pkgs.zip
-            pkgs.unzip
-            pkgs.gzip
-            pkgs.bzip2
-            pkgs.xz
-            pkgs.zstd
-            pkgs.gnutar
-            pkgs.p7zip
-            pkgs.lzip
-            pkgs.lz4
-            pkgs.tree
-            pkgs.file
-            pkgs.coreutils
-          ]}:$PATH"
+          export PATH="${
+            pkgs.lib.makeBinPath [
+              pkgs.zip
+              pkgs.unzip
+              pkgs.gzip
+              pkgs.bzip2
+              pkgs.xz
+              pkgs.zstd
+              pkgs.gnutar
+              pkgs.p7zip
+              pkgs.lzip
+              pkgs.lz4
+              pkgs.tree
+              pkgs.file
+              pkgs.coreutils
+            ]
+          }:$PATH"
 
           SCRIPT_DIR="$(cd "$(dirname "''${BASH_SOURCE[0]}")" && pwd)"
           TEST_DIR="''${1:-test-archives}"
@@ -363,103 +368,6 @@
           echo "  tar -tJf *.tar.xz"
         '';
 
-        packages.publish = pkgs.writeShellScriptBin "publish-crate" ''
-          set -e
-
-          # Add required tools to PATH
-          export PATH="${pkgs.lib.makeBinPath [
-            pkgs.git
-            pkgs.cargo
-            pkgs.gnused
-            pkgs.gnugrep
-            pkgs.coreutils
-          ]}:$PATH"
-
-          VERSION="$1"
-
-          # Check if the version was provided
-          if [ -z "$VERSION" ]; then
-              echo "Error: No version provided"
-              echo "Usage: nix run .#publish <version>"
-              echo "Example: nix run .#publish 0.1.0"
-              exit 1
-          fi
-
-          # Check if the version is valid
-          if ! echo "$VERSION" | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+$"; then
-              echo "Error: Invalid version"
-              echo "Version must be in the format X.Y.Z"
-              exit 1
-          fi
-
-          # Check if on main branch
-          CURRENT_BRANCH=$(git branch --show-current)
-          if [ "$CURRENT_BRANCH" != "main" ]; then
-              echo "Error: Not on main branch (currently on: $CURRENT_BRANCH)"
-              exit 1
-          fi
-
-          # Check if working directory is clean
-          if [ -n "$(git status --porcelain)" ]; then
-              echo "Error: Working directory is not clean"
-              echo "Please commit or stash your changes first"
-              git status --short
-              exit 1
-          fi
-
-          # Check if the version is already in the Cargo.toml file
-          if grep -qE "^version = \"$VERSION\"" Cargo.toml; then
-              echo "Error: Version $VERSION is already in Cargo.toml"
-              exit 1
-          fi
-
-          # Check if tag already exists
-          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
-              echo "Error: Tag v$VERSION already exists"
-              exit 1
-          fi
-
-          # Run tests to make sure everything works
-          echo ""
-          echo "Running tests..."
-          cargo test
-
-          # Run docs tests
-          echo ""
-          echo "Running docs tests..."
-          cargo test --doc
-
-          # Update the version in the Cargo.toml file
-          echo "Updating Cargo.toml..."
-          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
-
-          # Build to update Cargo.lock
-          echo ""
-          echo "Building..."
-          cargo build --release
-
-          # Commit the changes
-          echo ""
-          echo "Committing changes..."
-          git add Cargo.toml Cargo.lock
-          git commit -m "Release version $VERSION"
-
-          # Push the changes
-          echo "Pushing changes..."
-          git push
-
-          # Tag the commit
-          echo "Creating tag v$VERSION..."
-          git tag "v$VERSION"
-
-          # Push the tag
-          echo "Pushing tag..."
-          git push origin "v$VERSION"
-
-          echo ""
-          echo "✅ Successfully triggered version $VERSION publish!"
-        '';
-
         apps = {
           default = {
             type = "app";
@@ -469,11 +377,6 @@
           generateTestArchives = {
             type = "app";
             program = "${self.packages.${system}.generate-archives}/bin/generate-test-archives";
-          };
-
-          publish = {
-            type = "app";
-            program = "${self.packages.${system}.publish}/bin/publish-crate";
           };
         };
       }
