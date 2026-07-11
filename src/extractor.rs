@@ -6,54 +6,120 @@
 
 use crate::error::{ArchiveError, Result};
 use crate::format::ArchiveFormat;
+use crate::path_safety::validate_path;
 use std::io::{Cursor, Read};
 
-/// Represents a single file extracted from an archive.
+/// Unix mode bits identifying a symbolic link (`S_IFLNK`), as stored in the
+/// upper 16 bits of a ZIP entry's `unix_mode()`.
+const S_IFLNK: u32 = 0o120000;
+const S_IFMT: u32 = 0o170000;
+
+/// A single entry extracted from an archive.
 ///
-/// This structure contains the file's path within the archive, its contents,
-/// and metadata about whether it represents a directory.
+/// Each variant carries only the fields that make sense for that kind of
+/// entry, so states like "directory with file contents" or "symlink with no
+/// target" can't be represented.
 ///
 /// # Examples
 ///
 /// ```no_run
-/// use archive::{ArchiveExtractor, ArchiveFormat};
+/// use archive::{ArchiveEntry, ArchiveExtractor, ArchiveFormat};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let extractor = ArchiveExtractor::new();
 /// # let data = vec![0u8; 100];
-/// let files = extractor.extract(&data, ArchiveFormat::Zip)?;
+/// let entries = extractor.extract(&data, ArchiveFormat::Zip)?;
 ///
-/// for file in files {
-///     if file.is_directory {
-///         println!("Directory: {}", file.path);
-///     } else {
-///         println!("File: {} ({} bytes)", file.path, file.data.len());
-///         // Process file.data as needed
+/// for entry in &entries {
+///     match entry {
+///         ArchiveEntry::File { path, data } => {
+///             println!("File: {} ({} bytes)", path, data.len());
+///         }
+///         ArchiveEntry::Directory { path } => {
+///             println!("Directory: {}", path);
+///         }
+///         ArchiveEntry::Symlink { path, target } => {
+///             println!("Symlink: {} -> {}", path, target);
+///         }
 ///     }
 /// }
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Debug, Clone)]
-pub struct ExtractedFile {
-    /// The original path of the file within the archive.
-    ///
-    /// For multi-file archives (ZIP, TAR, 7-Zip), this is the path as stored
-    /// in the archive. For single-file compression formats:
-    /// - **Gzip**: The original filename from the header, or "data" if not present
-    /// - **Bzip2, XZ, LZ4, Zstandard**: Always "data" as these formats don't store filenames
-    pub path: String,
+pub enum ArchiveEntry {
+    /// A regular file with decompressed contents.
+    File {
+        /// The path of the file within the archive.
+        ///
+        /// For multi-file archives (ZIP, TAR, 7-Zip), this is the path as
+        /// stored in the archive. For single-file compression formats:
+        /// - **Gzip**: The original filename from the header, or "data" if not present
+        /// - **Bzip2, XZ, LZ4, Zstandard**: Always "data" as these formats don't store filenames
+        path: String,
+        /// The decompressed contents of the file.
+        data: Vec<u8>,
+    },
 
-    /// The decompressed contents of the file.
-    ///
-    /// For directories, this will be an empty vector.
-    pub data: Vec<u8>,
+    /// A directory entry.
+    Directory {
+        /// The path of the directory within the archive.
+        path: String,
+    },
 
-    /// Whether this entry represents a directory.
+    /// A symbolic (or hard) link entry.
     ///
-    /// If `true`, the `data` field will be empty and `path` represents a directory.
-    /// If `false`, this is a regular file with content in `data`.
-    pub is_directory: bool,
+    /// The target has already been validated to not contain a `..`
+    /// component or be absolute — extraction fails with
+    /// [`ArchiveError::UnsafePath`] before this variant is ever produced for
+    /// an unsafe target.
+    ///
+    /// Callers that materialize entries onto a filesystem should treat
+    /// symlink entries with extra care: creating a symlink and then writing
+    /// through a later entry that happens to resolve through it is a classic
+    /// archive extraction attack, so most callers should either skip
+    /// symlink entries entirely or re-validate the target against their own
+    /// extraction root before creating the link.
+    Symlink {
+        /// The path of the symlink within the archive.
+        path: String,
+        /// The link target, as recorded in the archive.
+        target: String,
+    },
+}
+
+impl ArchiveEntry {
+    /// Returns the path of this entry within the archive.
+    pub fn path(&self) -> &str {
+        match self {
+            ArchiveEntry::File { path, .. } => path,
+            ArchiveEntry::Directory { path } => path,
+            ArchiveEntry::Symlink { path, .. } => path,
+        }
+    }
+
+    /// Returns `true` if this entry is a regular file.
+    pub fn is_file(&self) -> bool {
+        matches!(self, ArchiveEntry::File { .. })
+    }
+
+    /// Returns `true` if this entry is a directory.
+    pub fn is_directory(&self) -> bool {
+        matches!(self, ArchiveEntry::Directory { .. })
+    }
+
+    /// Returns `true` if this entry is a symlink.
+    pub fn is_symlink(&self) -> bool {
+        matches!(self, ArchiveEntry::Symlink { .. })
+    }
+
+    /// Returns the file contents, or `None` if this entry isn't a [`ArchiveEntry::File`].
+    pub fn data(&self) -> Option<&[u8]> {
+        match self {
+            ArchiveEntry::File { data, .. } => Some(data),
+            _ => None,
+        }
+    }
 }
 
 /// Main extractor that handles all archive formats.
@@ -234,8 +300,8 @@ impl ArchiveExtractor {
     ///
     /// # Returns
     ///
-    /// Returns a `Vec<ExtractedFile>` containing all files and directories from the archive.
-    /// Directories will have `is_directory` set to `true` and an empty `data` field.
+    /// Returns a `Vec<ArchiveEntry>` containing all files, directories, and symlinks
+    /// from the archive.
     ///
     /// # Errors
     ///
@@ -259,8 +325,8 @@ impl ArchiveExtractor {
     /// let extractor = ArchiveExtractor::new();
     /// let files = extractor.extract(&data, ArchiveFormat::Zip)?;
     ///
-    /// for file in files {
-    ///     println!("{}: {} bytes", file.path, file.data.len());
+    /// for entry in &files {
+    ///     println!("{}: {} bytes", entry.path(), entry.data().map_or(0, <[u8]>::len));
     /// }
     /// # Ok(())
     /// # }
@@ -311,7 +377,7 @@ impl ArchiveExtractor {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn extract(&self, data: &[u8], format: ArchiveFormat) -> Result<Vec<ExtractedFile>> {
+    pub fn extract(&self, data: &[u8], format: ArchiveFormat) -> Result<Vec<ArchiveEntry>> {
         match format {
             ArchiveFormat::Zip => self.extract_zip(data),
             ArchiveFormat::Tar => self.extract_tar(data),
@@ -331,7 +397,7 @@ impl ArchiveExtractor {
         }
     }
 
-    fn extract_zip(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_zip(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let reader = Cursor::new(data);
         let mut archive = zip::ZipArchive::new(reader)?;
         let mut files = Vec::new();
@@ -340,6 +406,12 @@ impl ArchiveExtractor {
         for i in 0..archive.len() {
             let mut file = archive.by_index(i)?;
             let is_directory = file.is_dir();
+            let path = file.name().to_string();
+            validate_path(&path)?;
+
+            let is_symlink = file
+                .unix_mode()
+                .is_some_and(|mode| mode & S_IFMT == S_IFLNK);
 
             if !is_directory {
                 let size = file.size() as usize;
@@ -361,56 +433,57 @@ impl ArchiveExtractor {
                 let mut contents = Vec::new();
                 file.read_to_end(&mut contents)?;
 
-                files.push(ExtractedFile {
-                    path: file.name().to_string(),
-                    data: contents,
-                    is_directory,
-                });
+                if is_symlink {
+                    let target = String::from_utf8_lossy(&contents).into_owned();
+                    validate_path(&target)?;
+                    files.push(ArchiveEntry::Symlink { path, target });
+                } else {
+                    files.push(ArchiveEntry::File {
+                        path,
+                        data: contents,
+                    });
+                }
             } else {
-                files.push(ExtractedFile {
-                    path: file.name().to_string(),
-                    data: Vec::new(),
-                    is_directory,
-                });
+                files.push(ArchiveEntry::Directory { path });
             }
         }
 
         Ok(files)
     }
 
-    fn extract_tar(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_tar(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let cursor = Cursor::new(data);
         let mut archive = tar::Archive::new(cursor);
         self.process_tar_entries(&mut archive)
     }
 
-    fn extract_ar(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_ar(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let cursor = Cursor::new(data);
         let mut archive = ar::Archive::new(cursor);
         self.process_ar_entries(&mut archive)
     }
 
-    fn extract_deb(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_deb(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let cursor = Cursor::new(data);
         let mut archive = ar::Archive::new(cursor);
         self.process_ar_entries(&mut archive)
     }
 
-    fn extract_tar_gz(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_tar_gz(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let cursor = Cursor::new(data);
         let decoder = flate2::read::GzDecoder::new(cursor);
         let mut archive = tar::Archive::new(decoder);
         self.process_tar_entries(&mut archive)
     }
 
-    fn extract_tar_bz2(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_tar_bz2(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let cursor = Cursor::new(data);
         let decoder = bzip2::read::BzDecoder::new(cursor);
         let mut archive = tar::Archive::new(decoder);
         self.process_tar_entries(&mut archive)
     }
 
-    fn extract_tar_xz(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_tar_xz(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let cursor = Cursor::new(data);
         let mut output = Vec::new();
         lzma_rs::xz_decompress(&mut cursor.clone(), &mut output)
@@ -420,21 +493,21 @@ impl ArchiveExtractor {
         self.process_tar_entries(&mut archive)
     }
 
-    fn extract_tar_zst(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_tar_zst(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let cursor = Cursor::new(data);
         let decoder = zstd::stream::read::Decoder::new(cursor)?;
         let mut archive = tar::Archive::new(decoder);
         self.process_tar_entries(&mut archive)
     }
 
-    fn extract_tar_lz4(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_tar_lz4(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let cursor = Cursor::new(data);
         let decoder = lz4::Decoder::new(cursor)?;
         let mut archive = tar::Archive::new(decoder);
         self.process_tar_entries(&mut archive)
     }
 
-    fn extract_7z(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_7z(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let mut cursor = Cursor::new(data);
         let len = cursor.get_ref().len() as u64;
 
@@ -443,20 +516,22 @@ impl ArchiveExtractor {
 
         let mut files = Vec::new();
         let mut total_size = 0usize;
-        let mut size_error: Option<ArchiveError> = None;
+        let mut early_error: Option<ArchiveError> = None;
 
         // Single-pass extraction: validate sizes and extract contents in one iteration
         let result = archive.for_each_entries(|entry, reader| {
+            let path = entry.name().to_string();
+            if let Err(e) = validate_path(&path) {
+                early_error = Some(e);
+                return Ok(false); // Stop iteration
+            }
+
             if entry.is_directory() {
-                files.push(ExtractedFile {
-                    path: entry.name().to_string(),
-                    data: Vec::new(),
-                    is_directory: true,
-                });
+                files.push(ArchiveEntry::Directory { path });
             } else {
                 let size = entry.size() as usize;
                 if size > self.max_file_size {
-                    size_error = Some(ArchiveError::FileTooLarge {
+                    early_error = Some(ArchiveError::FileTooLarge {
                         size,
                         limit: self.max_file_size,
                     });
@@ -465,7 +540,7 @@ impl ArchiveExtractor {
 
                 total_size += size;
                 if total_size > self.max_total_size {
-                    size_error = Some(ArchiveError::TotalSizeTooLarge {
+                    early_error = Some(ArchiveError::TotalSizeTooLarge {
                         size: total_size,
                         limit: self.max_total_size,
                     });
@@ -475,17 +550,16 @@ impl ArchiveExtractor {
                 let mut contents = Vec::new();
                 reader.read_to_end(&mut contents)?;
 
-                files.push(ExtractedFile {
-                    path: entry.name().to_string(),
+                files.push(ArchiveEntry::File {
+                    path,
                     data: contents,
-                    is_directory: false,
                 });
             }
             Ok(true)
         });
 
-        // Check if we stopped due to size limits
-        if let Some(err) = size_error {
+        // Check if we stopped due to a size or path-safety violation
+        if let Some(err) = early_error {
             return Err(err);
         }
 
@@ -497,7 +571,7 @@ impl ArchiveExtractor {
 
     // Single-file decompression methods
 
-    fn extract_single_gz(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_single_gz(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let cursor = Cursor::new(data);
         let mut decoder = flate2::read::GzDecoder::new(cursor);
         let mut decompressed = Vec::new();
@@ -510,22 +584,24 @@ impl ArchiveExtractor {
             });
         }
 
-        // Try to extract original filename from gzip header
+        // Try to extract original filename from gzip header. Fall back to
+        // "data" if it's missing, not valid UTF-8, or unsafe (a gzip header
+        // filename is attacker-controlled and could contain e.g. "../..").
         let path = decoder
             .header()
             .and_then(|h| h.filename())
             .and_then(|f| std::str::from_utf8(f).ok())
+            .filter(|f| validate_path(f).is_ok())
             .unwrap_or("data")
             .to_string();
 
-        Ok(vec![ExtractedFile {
+        Ok(vec![ArchiveEntry::File {
             path,
             data: decompressed,
-            is_directory: false,
         }])
     }
 
-    fn extract_single_bz2(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_single_bz2(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let cursor = Cursor::new(data);
         let mut decoder = bzip2::read::BzDecoder::new(cursor);
         let mut decompressed = Vec::new();
@@ -538,14 +614,13 @@ impl ArchiveExtractor {
             });
         }
 
-        Ok(vec![ExtractedFile {
+        Ok(vec![ArchiveEntry::File {
             path: "data".to_string(),
             data: decompressed,
-            is_directory: false,
         }])
     }
 
-    fn extract_single_xz(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_single_xz(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let mut cursor = Cursor::new(data);
         let mut decompressed = Vec::new();
         lzma_rs::xz_decompress(&mut cursor, &mut decompressed)
@@ -558,14 +633,13 @@ impl ArchiveExtractor {
             });
         }
 
-        Ok(vec![ExtractedFile {
+        Ok(vec![ArchiveEntry::File {
             path: "data".to_string(),
             data: decompressed,
-            is_directory: false,
         }])
     }
 
-    fn extract_single_lz4(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_single_lz4(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let cursor = Cursor::new(data);
         let mut decoder = lz4::Decoder::new(cursor)?;
         let mut decompressed = Vec::new();
@@ -578,14 +652,13 @@ impl ArchiveExtractor {
             });
         }
 
-        Ok(vec![ExtractedFile {
+        Ok(vec![ArchiveEntry::File {
             path: "data".to_string(),
             data: decompressed,
-            is_directory: false,
         }])
     }
 
-    fn extract_single_zst(&self, data: &[u8]) -> Result<Vec<ExtractedFile>> {
+    fn extract_single_zst(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
         let cursor = Cursor::new(data);
         let mut decoder = zstd::stream::read::Decoder::new(cursor)?;
         let mut decompressed = Vec::new();
@@ -598,26 +671,37 @@ impl ArchiveExtractor {
             });
         }
 
-        Ok(vec![ExtractedFile {
+        Ok(vec![ArchiveEntry::File {
             path: "data".to_string(),
             data: decompressed,
-            is_directory: false,
         }])
     }
 
     fn process_tar_entries<R: Read>(
         &self,
         archive: &mut tar::Archive<R>,
-    ) -> Result<Vec<ExtractedFile>> {
+    ) -> Result<Vec<ArchiveEntry>> {
         let mut files = Vec::new();
         let mut total_size = 0usize;
 
         for entry_result in archive.entries()? {
             let mut entry = entry_result?;
             let path = entry.path()?.to_string_lossy().to_string();
-            let is_directory = entry.header().entry_type().is_dir();
+            validate_path(&path)?;
 
-            if !is_directory {
+            let entry_type = entry.header().entry_type();
+            let is_directory = entry_type.is_dir();
+            let is_symlink = entry_type.is_symlink() || entry_type.is_hard_link();
+
+            if is_symlink {
+                let target = entry
+                    .link_name()?
+                    .map(|t| t.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                validate_path(&target)?;
+
+                files.push(ArchiveEntry::Symlink { path, target });
+            } else if !is_directory {
                 let size = entry.size() as usize;
                 if size > self.max_file_size {
                     return Err(ArchiveError::FileTooLarge {
@@ -637,17 +721,12 @@ impl ArchiveExtractor {
                 let mut contents = Vec::new();
                 entry.read_to_end(&mut contents)?;
 
-                files.push(ExtractedFile {
+                files.push(ArchiveEntry::File {
                     path,
                     data: contents,
-                    is_directory,
                 });
             } else {
-                files.push(ExtractedFile {
-                    path,
-                    data: Vec::new(),
-                    is_directory,
-                });
+                files.push(ArchiveEntry::Directory { path });
             }
         }
 
@@ -657,13 +736,14 @@ impl ArchiveExtractor {
     fn process_ar_entries<R: Read>(
         &self,
         archive: &mut ar::Archive<R>,
-    ) -> Result<Vec<ExtractedFile>> {
+    ) -> Result<Vec<ArchiveEntry>> {
         let mut files = Vec::new();
         let mut total_size = 0usize;
 
-        while let Some(entry_result) = archive.next_entry(){
+        while let Some(entry_result) = archive.next_entry() {
             let mut entry = entry_result?;
             let path = String::from_utf8_lossy(entry.header().identifier()).to_string();
+            validate_path(&path)?;
 
             let size = entry.header().size() as usize;
             if size > self.max_file_size {
@@ -684,11 +764,7 @@ impl ArchiveExtractor {
             let mut contents = Vec::new();
             entry.read_to_end(&mut contents)?;
 
-            files.push(ExtractedFile {
-                path,
-                data: contents,
-                is_directory: false,
-            });
+            files.push(ArchiveEntry::File { path, data: contents });
         }
 
         Ok(files)

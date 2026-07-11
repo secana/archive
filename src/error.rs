@@ -124,4 +124,18 @@ pub enum ArchiveError {
     /// The string contains details about what is unsupported.
     #[error("Unsupported format: {0}")]
     UnsupportedFormat(String),
+
+    /// An entry's path (or, for symlinks, its target) is unsafe to extract.
+    ///
+    /// This is a safety feature to prevent path traversal and symlink
+    /// attacks. It is returned when an archive entry's path is absolute,
+    /// contains a `..` component, or (for symlink entries) points outside
+    /// the archive via such a path. Extraction is aborted rather than
+    /// silently skipping the offending entry, since a malicious archive
+    /// could otherwise smuggle unsafe entries past a caller that only
+    /// checks the return value.
+    ///
+    /// The string contains the offending path.
+    #[error("Unsafe archive entry path: {0}")]
+    UnsafePath(String),
 }
