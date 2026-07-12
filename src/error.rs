@@ -125,6 +125,28 @@ pub enum ArchiveError {
     #[error("Unsupported format: {0}")]
     UnsupportedFormat(String),
 
+    /// Failed to allocate a buffer for an archive entry's contents.
+    ///
+    /// This is distinct from [`ArchiveError::FileTooLarge`]: it means the
+    /// entry's declared size was within the configured limit, but the
+    /// allocator couldn't actually satisfy a reservation of that size right
+    /// now (e.g. the process is low on available memory). Buffers for
+    /// entries with a known declared size are reserved up front via
+    /// `Vec::try_reserve_exact` specifically so this can be caught as a
+    /// normal error instead of aborting the process.
+    ///
+    /// # Fields
+    ///
+    /// - `size`: The number of bytes that failed to be reserved
+    #[error("Failed to allocate {size} bytes for archive entry: {source}")]
+    AllocationFailed {
+        /// The number of bytes that failed to be reserved
+        size: usize,
+        /// The underlying allocation error
+        #[source]
+        source: std::collections::TryReserveError,
+    },
+
     /// An entry's path (or, for symlinks, its target) is unsafe to extract.
     ///
     /// This is a safety feature to prevent path traversal and symlink
