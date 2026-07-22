@@ -16,7 +16,7 @@ fn test_verify_file_contents() {
 
     // Find hello.txt and verify its content
     let hello_file = assert_contains_file(&files, "hello.txt");
-    let content = String::from_utf8_lossy(&hello_file.data);
+    let content = String::from_utf8_lossy(hello_file.data().unwrap());
 
     assert_eq!(content.trim(), "Hello, World!", "Unexpected file content");
 }
@@ -48,7 +48,7 @@ fn test_binary_file_extraction() {
 
     // Should be 10KB of random data
     assert_eq!(
-        binary_file.data.len(),
+        binary_file.data().unwrap().len(),
         10 * 1024,
         "Expected 10KB binary file"
     );
@@ -67,5 +67,5 @@ fn test_large_file_extraction() {
     let large_file = assert_contains_file(&files, "large-file.bin");
 
     // Should be 1MB of random data
-    assert_eq!(large_file.data.len(), 1024 * 1024, "Expected 1MB file");
+    assert_eq!(large_file.data().unwrap().len(), 1024 * 1024, "Expected 1MB file");
 }

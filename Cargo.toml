@@ -1,6 +1,6 @@
 [package]
 name = "archive"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2024"
 authors = ["secana"]
 license = "MIT OR Apache-2.0"
@@ -22,3 +22,6 @@ sevenz-rust = "0.6"
 thiserror = "2.0"
 mime-type = "0.2"
 ar = "0.9.0"
+
+[dev-dependencies]
+crc32fast = "1.4"

@@ -124,4 +124,40 @@ pub enum ArchiveError {
     /// The string contains details about what is unsupported.
     #[error("Unsupported format: {0}")]
     UnsupportedFormat(String),
+
+    /// Failed to allocate a buffer for an archive entry's contents.
+    ///
+    /// This is distinct from [`ArchiveError::FileTooLarge`]: it means the
+    /// entry's declared size was within the configured limit, but the
+    /// allocator couldn't actually satisfy a reservation of that size right
+    /// now (e.g. the process is low on available memory). Buffers for
+    /// entries with a known declared size are reserved up front via
+    /// `Vec::try_reserve_exact` specifically so this can be caught as a
+    /// normal error instead of aborting the process.
+    ///
+    /// # Fields
+    ///
+    /// - `size`: The number of bytes that failed to be reserved
+    #[error("Failed to allocate {size} bytes for archive entry: {source}")]
+    AllocationFailed {
+        /// The number of bytes that failed to be reserved
+        size: usize,
+        /// The underlying allocation error
+        #[source]
+        source: std::collections::TryReserveError,
+    },
+
+    /// An entry's path (or, for symlinks, its target) is unsafe to extract.
+    ///
+    /// This is a safety feature to prevent path traversal and symlink
+    /// attacks. It is returned when an archive entry's path is absolute,
+    /// contains a `..` component, or (for symlink entries) points outside
+    /// the archive via such a path. Extraction is aborted rather than
+    /// silently skipping the offending entry, since a malicious archive
+    /// could otherwise smuggle unsafe entries past a caller that only
+    /// checks the return value.
+    ///
+    /// The string contains the offending path.
+    #[error("Unsafe archive entry path: {0}")]
+    UnsafePath(String),
 }
