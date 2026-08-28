@@ -8,7 +8,7 @@
 //!
 //! - **Unified API**: Single interface for all archive formats
 //! - **In-memory extraction**: No disk I/O required
-//! - **Safety limits**: Protection against zip bombs and resource exhaustion
+//! - **Safety limits**: Protection against zip bombs, path traversal attacks, and resource exhaustion
 //! - **Pure Rust**: Minimal C dependencies (only bzip2)
 //! - **Cross-platform**: Works on Linux, macOS, Windows (x86_64, ARM64)
 //!
@@ -38,9 +38,9 @@
 //! let files = extractor.extract(&data, ArchiveFormat::Zip)?;
 //!
 //! // Process extracted files
-//! for file in files {
-//!     if !file.is_directory {
-//!         println!("File: {} ({} bytes)", file.path, file.data.len());
+//! for entry in &files {
+//!     if let archive::ArchiveEntry::File { path, data } = entry {
+//!         println!("File: {} ({} bytes)", path, data.len());
 //!     }
 //! }
 //! # Ok(())
@@ -126,7 +126,8 @@
 pub mod error;
 pub mod extractor;
 pub mod format;
+pub mod path_safety;
 
 pub use error::{ArchiveError, Result};
-pub use extractor::{ArchiveExtractor, ExtractedFile};
+pub use extractor::{ArchiveEntry, ArchiveExtractor};
 pub use format::ArchiveFormat;

@@ -15,7 +15,7 @@ fn test_single_gz_decompression() {
         .expect("Failed to decompress hello.txt.gz");
 
     assert_eq!(files.len(), 1, "Expected single decompressed file");
-    let content = String::from_utf8_lossy(&files[0].data);
+    let content = String::from_utf8_lossy(files[0].data().unwrap());
     assert_eq!(content.trim(), "Hello, World!");
 }
 
@@ -29,7 +29,7 @@ fn test_single_bz2_decompression() {
         .expect("Failed to decompress hello.txt.bz2");
 
     assert_eq!(files.len(), 1, "Expected single decompressed file");
-    let content = String::from_utf8_lossy(&files[0].data);
+    let content = String::from_utf8_lossy(files[0].data().unwrap());
     assert_eq!(content.trim(), "Hello, World!");
 }
 
@@ -43,7 +43,7 @@ fn test_single_xz_decompression() {
         .expect("Failed to decompress hello.txt.xz");
 
     assert_eq!(files.len(), 1, "Expected single decompressed file");
-    let content = String::from_utf8_lossy(&files[0].data);
+    let content = String::from_utf8_lossy(files[0].data().unwrap());
     assert_eq!(content.trim(), "Hello, World!");
 }
 
@@ -57,7 +57,7 @@ fn test_single_lz4_decompression() {
         .expect("Failed to decompress hello.txt.lz4");
 
     assert_eq!(files.len(), 1, "Expected single decompressed file");
-    let content = String::from_utf8_lossy(&files[0].data);
+    let content = String::from_utf8_lossy(files[0].data().unwrap());
     assert_eq!(content.trim(), "Hello, World!");
 }
 
@@ -71,7 +71,7 @@ fn test_single_zst_decompression() {
         .expect("Failed to decompress hello.txt.zst");
 
     assert_eq!(files.len(), 1, "Expected single decompressed file");
-    let content = String::from_utf8_lossy(&files[0].data);
+    let content = String::from_utf8_lossy(files[0].data().unwrap());
     assert_eq!(content.trim(), "Hello, World!");
 }
 
@@ -88,9 +88,9 @@ fn test_gz_extracts_original_filename() {
     // Gzip files created with gzip tool typically store the original filename
     // If no filename in header, should default to "data"
     assert!(
-        files[0].path == "hello.txt" || files[0].path == "data",
+        files[0].path() == "hello.txt" || files[0].path() == "data",
         "Expected 'hello.txt' or 'data', got '{}'",
-        files[0].path
+        files[0].path()
     );
 }
 
@@ -105,7 +105,7 @@ fn test_bz2_uses_data_as_filename() {
 
     assert_eq!(files.len(), 1);
     // bzip2 format doesn't store original filename
-    assert_eq!(files[0].path, "data");
+    assert_eq!(files[0].path(), "data");
 }
 
 #[test]
@@ -119,7 +119,7 @@ fn test_xz_uses_data_as_filename() {
 
     assert_eq!(files.len(), 1);
     // xz format doesn't store original filename
-    assert_eq!(files[0].path, "data");
+    assert_eq!(files[0].path(), "data");
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn test_lz4_uses_data_as_filename() {
 
     assert_eq!(files.len(), 1);
     // lz4 format doesn't store original filename
-    assert_eq!(files[0].path, "data");
+    assert_eq!(files[0].path(), "data");
 }
 
 #[test]
@@ -147,5 +147,5 @@ fn test_zst_uses_data_as_filename() {
 
     assert_eq!(files.len(), 1);
     // zstd format doesn't store original filename
-    assert_eq!(files[0].path, "data");
+    assert_eq!(files[0].path(), "data");
 }

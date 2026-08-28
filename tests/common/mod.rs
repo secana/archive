@@ -1,6 +1,6 @@
 //! Common test utilities and helpers
 
-use archive::ExtractedFile;
+use archive::ArchiveEntry;
 use std::fs;
 use std::path::Path;
 
@@ -20,12 +20,12 @@ pub fn read_test_archive(filename: &str) -> Vec<u8> {
 /// Helper to check if extracted files contain expected content
 #[allow(dead_code)]
 pub fn assert_contains_file<'a>(
-    files: &'a [ExtractedFile],
+    files: &'a [ArchiveEntry],
     path_contains: &str,
-) -> &'a ExtractedFile {
+) -> &'a ArchiveEntry {
     files
         .iter()
-        .find(|f| f.path.contains(path_contains))
+        .find(|f| f.path().contains(path_contains))
         .unwrap_or_else(|| {
             panic!(
                 "Expected to find file containing '{}' in path",

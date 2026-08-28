@@ -123,7 +123,7 @@ fn test_nested_tar_gz() {
     // Should contain other archive files
     let nested_files: Vec<_> = files
         .iter()
-        .filter(|f| f.path.ends_with(".zip") || f.path.ends_with(".tar.gz"))
+        .filter(|f| f.path().ends_with(".zip") || f.path().ends_with(".tar.gz"))
         .collect();
 
     assert!(!nested_files.is_empty(), "Expected to find nested archives");
@@ -154,24 +154,24 @@ fn test_all_tar_formats_produce_same_structure() {
     // All should contain the same files
     for file in &files_tar {
         assert!(
-            files_tar_gz.iter().any(|f| f.path == file.path),
+            files_tar_gz.iter().any(|f| f.path() == file.path()),
             "tar.gz missing file: {}",
-            file.path
+            file.path()
         );
         assert!(
-            files_tar_bz2.iter().any(|f| f.path == file.path),
+            files_tar_bz2.iter().any(|f| f.path() == file.path()),
             "tar.bz2 missing file: {}",
-            file.path
+            file.path()
         );
         assert!(
-            files_tar_xz.iter().any(|f| f.path == file.path),
+            files_tar_xz.iter().any(|f| f.path() == file.path()),
             "tar.xz missing file: {}",
-            file.path
+            file.path()
         );
         assert!(
-            files_tar_zst.iter().any(|f| f.path == file.path),
+            files_tar_zst.iter().any(|f| f.path() == file.path()),
             "tar.zst missing file: {}",
-            file.path
+            file.path()
         );
     }
 }
