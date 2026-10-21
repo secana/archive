@@ -7,7 +7,9 @@
 //!
 //! This crafts such a zip by hand (the `zip` crate's own writer always
 //! computes an honest size, so it can't be used to build the malicious
-//! case) and confirms extraction is now rejected via `FileTooLarge`.
+//! case) and confirms extraction is rejected. Since `zip` 9 the zip crate
+//! itself fails reads that exceed the declared size; the bounded read in
+//! this crate stays in place as a second line of defense.
 
 use archive::{ArchiveError, ArchiveExtractor, ArchiveFormat};
 use flate2::Compression;
@@ -87,7 +89,13 @@ fn zip_lying_declared_size_is_rejected_via_actual_bytes_read() {
     // Well above the lie (100 bytes), well below the real size (50MB).
     let extractor = ArchiveExtractor::new().with_max_file_size(10 * 1024 * 1024);
     let err = extractor.extract(&zip, ArchiveFormat::Zip).unwrap_err();
-    assert!(matches!(err, ArchiveError::FileTooLarge { .. }), "{err:?}");
+    assert!(
+        matches!(
+            &err,
+            ArchiveError::FileTooLarge { .. } | ArchiveError::Io(_)
+        ),
+        "{err:?}"
+    );
 }
 
 #[test]

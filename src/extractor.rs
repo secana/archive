@@ -573,7 +573,7 @@ impl ArchiveExtractor {
         for i in 0..archive.len() {
             let mut file = archive.by_index(i)?;
             let is_directory = file.is_dir();
-            let path = file.name().to_string();
+            let path = file.name()?.into_owned();
             validate_path(&path)?;
 
             let is_symlink = file
