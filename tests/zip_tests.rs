@@ -78,7 +78,7 @@ fn test_nested_zip() {
     // Should contain other archive files
     let nested_files: Vec<_> = files
         .iter()
-        .filter(|f| f.path.ends_with(".zip") || f.path.ends_with(".tar.gz"))
+        .filter(|f| f.path().ends_with(".zip") || f.path().ends_with(".tar.gz"))
         .collect();
 
     assert!(!nested_files.is_empty(), "Expected to find nested archives");
@@ -97,17 +97,17 @@ fn test_deeply_nested_zip() {
 
     // First level extraction
     let level1_file = assert_contains_file(&files, "level1.txt");
-    assert!(!level1_file.data.is_empty());
+    assert!(!level1_file.data().unwrap().is_empty());
 
     // Should contain level2.zip
     let level2_zip = files
         .iter()
-        .find(|f| f.path.contains("level2.zip"))
+        .find(|f| f.path().contains("level2.zip"))
         .expect("Expected to find level2.zip");
 
     // Extract level 2
     let level2_files = extractor
-        .extract(&level2_zip.data, ArchiveFormat::Zip)
+        .extract(level2_zip.data().unwrap(), ArchiveFormat::Zip)
         .expect("Failed to extract level2.zip");
 
     assert_contains_file(&level2_files, "level2.txt");
@@ -135,7 +135,7 @@ fn test_empty_dirs_zip() {
         .expect("Failed to extract empty-dirs.zip");
 
     // Should contain directory entries
-    let dirs: Vec<_> = files.iter().filter(|f| f.is_directory).collect();
+    let dirs: Vec<_> = files.iter().filter(|f| f.is_directory()).collect();
     assert!(!dirs.is_empty(), "Expected to find directories");
 }
 
@@ -151,8 +151,8 @@ fn test_special_chars_zip() {
     assert!(!files.is_empty(), "Expected non-empty archive");
 
     // Check for files with special characters
-    let has_spaces = files.iter().any(|f| f.path.contains("file with spaces"));
-    let has_umlaut = files.iter().any(|f| f.path.contains("ümlaut"));
+    let has_spaces = files.iter().any(|f| f.path().contains("file with spaces"));
+    let has_umlaut = files.iter().any(|f| f.path().contains("ümlaut"));
 
     assert!(
         has_spaces || has_umlaut,
