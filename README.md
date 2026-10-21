@@ -6,14 +6,11 @@
 
 A unified, pure-Rust interface for extracting common archive formats in-memory.
 
-    This crate is currently in development and should not be used in production.
-    The API may change in future releases.
-
 ## Features
 
 - **Unified API**: Single interface for all archive formats
 - **In-memory extraction**: No disk I/O required
-- **Safety limits**: Protection against zip bombs and resource exhaustion
+- **Safety limits**: Protection against zip bombs, path traversal attacks, and resource exhaustion
 - **Pure Rust**: Minimal C dependencies (only bzip2)
 - **Cross-platform**: Works on Linux, macOS, Windows (x86_64, ARM64)
 
