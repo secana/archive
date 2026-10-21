@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/secana/archive/compare/v0.4.0...v0.5.0) - 2026-10-21
+
+### Fixed
+
+- [**breaking**] bound entry memory, allow in-root symlinks and add HardLink variant
+
+### Other
+
+- *(deps)* [**breaking**] bump zip from 8.6.0 to 9.0.5
+
 ## [0.3.2](https://github.com/secana/archive/compare/v0.3.1...v0.3.2) - 2026-06-14
 
 ### Other
