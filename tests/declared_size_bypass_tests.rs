@@ -100,3 +100,38 @@ fn zip_honest_declared_size_still_extracts_normally() {
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].data(), Some(&real_data[..]));
 }
+
+#[test]
+fn zip_overstated_declared_size_does_not_retain_capacity() {
+    // Claims 90 MB but holds a single byte. The buffer reserved from the
+    // declared size must not stay allocated, otherwise many such entries
+    // could hold far more memory than max_total_size allows.
+    let zip = build_zip_with_lying_size("small.txt", b"x", 90 * 1024 * 1024);
+
+    let files = ArchiveExtractor::new()
+        .extract(&zip, ArchiveFormat::Zip)
+        .unwrap();
+    let archive::ArchiveEntry::File { data, .. } = &files[0] else {
+        panic!("expected a file entry: {:?}", files[0]);
+    };
+    assert_eq!(data.as_slice(), b"x");
+    assert!(data.capacity() < 1024, "capacity {}", data.capacity());
+}
+
+#[test]
+fn zip_entry_is_bounded_by_remaining_total() {
+    // The entry is within max_file_size but larger than max_total_size, so
+    // it must be rejected by the total limit instead of the per-file limit.
+    let real_data = vec![0u8; 8 * 1024 * 1024];
+    let zip = build_zip_with_lying_size("big.txt", &real_data, real_data.len() as u32);
+
+    let err = ArchiveExtractor::new()
+        .with_max_file_size(10 * 1024 * 1024)
+        .with_max_total_size(4 * 1024 * 1024)
+        .extract(&zip, ArchiveFormat::Zip)
+        .unwrap_err();
+    assert!(
+        matches!(err, ArchiveError::TotalSizeTooLarge { .. }),
+        "{err:?}"
+    );
+}

@@ -6,7 +6,7 @@
 
 use crate::error::{ArchiveError, Result};
 use crate::format::ArchiveFormat;
-use crate::path_safety::validate_path;
+use crate::path_safety::{validate_links, validate_path};
 use std::io::{Cursor, Read, Write};
 
 /// Unix mode bits identifying a symbolic link (`S_IFLNK`), as stored in the
@@ -21,6 +21,10 @@ const S_IFMT: u32 = 0o170000;
 /// per-entry sizes; the allowance covers header overhead on archives with
 /// many small files. Individual entries are still checked precisely
 /// afterwards in [`ArchiveExtractor::process_tar_entries`].
+///
+/// Because the container is buffered before its entries are copied out,
+/// peak memory for `.tar.xz` extraction can reach roughly twice
+/// `max_total_size`.
 const TAR_XZ_HEADER_OVERHEAD_ALLOWANCE: usize = 64 * 1024 * 1024;
 
 /// A `Write` sink that stops accepting bytes once more than `limit` have
@@ -44,10 +48,27 @@ impl<'a> BoundedWriter<'a> {
     }
 }
 
-/// Reserves exactly `size` bytes of capacity in `buf` up front, so a
-/// declared-size entry that's within the configured limit but too large for
-/// the allocator to actually provide right now surfaces as
-/// [`ArchiveError::AllocationFailed`] instead of aborting the process.
+impl Write for BoundedWriter<'_> {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.total_seen += data.len();
+        if self.total_seen > self.limit {
+            return Err(std::io::Error::other(
+                "decompressed size exceeds configured limit",
+            ));
+        }
+        self.buf.extend_from_slice(data);
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Reserves exactly `size` bytes of capacity in `buf` up front, so an entry
+/// that's within the configured limit but too large for the allocator to
+/// actually provide right now surfaces as [`ArchiveError::AllocationFailed`]
+/// instead of aborting the process.
 fn reserve_exact(buf: &mut Vec<u8>, size: usize) -> Result<()> {
     buf.try_reserve_exact(size)
         .map_err(|source| ArchiveError::AllocationFailed { size, source })
@@ -77,23 +98,6 @@ fn bounded_read_to_end(
     })
 }
 
-impl Write for BoundedWriter<'_> {
-    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        self.total_seen += data.len();
-        if self.total_seen > self.limit {
-            return Err(std::io::Error::other(
-                "decompressed size exceeds configured limit",
-            ));
-        }
-        self.buf.extend_from_slice(data);
-        Ok(data.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 /// A single entry extracted from an archive.
 ///
 /// Each variant carries only the fields that make sense for that kind of
@@ -121,6 +125,9 @@ impl Write for BoundedWriter<'_> {
 ///         ArchiveEntry::Symlink { path, target } => {
 ///             println!("Symlink: {} -> {}", path, target);
 ///         }
+///         ArchiveEntry::HardLink { path, target } => {
+///             println!("Hard link: {} => {}", path, target);
+///         }
 ///     }
 /// }
 /// # Ok(())
@@ -147,23 +154,34 @@ pub enum ArchiveEntry {
         path: String,
     },
 
-    /// A symbolic (or hard) link entry.
+    /// A symbolic link entry.
     ///
-    /// The target has already been validated to not contain a `..`
-    /// component or be absolute — extraction fails with
-    /// [`ArchiveError::UnsafePath`] before this variant is ever produced for
-    /// an unsafe target.
+    /// The target is relative to the directory containing the symlink. It
+    /// has been validated to be relative and to resolve inside the
+    /// extraction root, and no other entry of the archive is placed beneath
+    /// a symlink. Extraction fails with [`ArchiveError::UnsafePath`] instead
+    /// of producing an unsafe symlink.
     ///
-    /// Callers that materialize entries onto a filesystem should treat
-    /// symlink entries with extra care: creating a symlink and then writing
-    /// through a later entry that happens to resolve through it is a classic
-    /// archive extraction attack, so most callers should either skip
-    /// symlink entries entirely or re-validate the target against their own
-    /// extraction root before creating the link.
+    /// These checks only cover the archive itself. Callers that materialize
+    /// entries onto a filesystem should still skip symlinks or re-validate
+    /// them against their own extraction root, because existing files in
+    /// that directory are not taken into account.
     Symlink {
         /// The path of the symlink within the archive.
         path: String,
         /// The link target, as recorded in the archive.
+        target: String,
+    },
+
+    /// A hard link entry (TAR only).
+    ///
+    /// Unlike a symlink target, the target is relative to the extraction
+    /// root and names another entry of the archive. It has been validated to
+    /// contain no `..` component and to not pass through a symlink.
+    HardLink {
+        /// The path of the hard link within the archive.
+        path: String,
+        /// The path of the linked entry within the archive.
         target: String,
     },
 }
@@ -175,6 +193,7 @@ impl ArchiveEntry {
             ArchiveEntry::File { path, .. } => path,
             ArchiveEntry::Directory { path } => path,
             ArchiveEntry::Symlink { path, .. } => path,
+            ArchiveEntry::HardLink { path, .. } => path,
         }
     }
 
@@ -191,6 +210,11 @@ impl ArchiveEntry {
     /// Returns `true` if this entry is a symlink.
     pub fn is_symlink(&self) -> bool {
         matches!(self, ArchiveEntry::Symlink { .. })
+    }
+
+    /// Returns `true` if this entry is a hard link.
+    pub fn is_hard_link(&self) -> bool {
+        matches!(self, ArchiveEntry::HardLink { .. })
     }
 
     /// Returns the file contents, or `None` if this entry isn't a [`ArchiveEntry::File`].
@@ -213,7 +237,10 @@ impl ArchiveEntry {
 /// The extractor includes built-in protections against:
 /// - **Zip bombs**: Files that expand to enormous sizes
 /// - **Resource exhaustion**: Configurable per-file and total size limits
-/// - **Memory exhaustion**: All limits are checked before allocation
+/// - **Memory exhaustion**: Limits are enforced against the bytes actually
+///   decompressed, not the sizes declared in the archive
+/// - **Path traversal**: Entry paths and link targets must stay inside the
+///   extraction root
 ///
 /// # Default Limits
 ///
@@ -380,7 +407,7 @@ impl ArchiveExtractor {
     ///
     /// # Returns
     ///
-    /// Returns a `Vec<ArchiveEntry>` containing all files, directories, and symlinks
+    /// Returns a `Vec<ArchiveEntry>` containing all files, directories, and links
     /// from the archive.
     ///
     /// # Errors
@@ -389,6 +416,9 @@ impl ArchiveExtractor {
     /// - The archive data is invalid or corrupted ([`ArchiveError::InvalidArchive`])
     /// - Any file exceeds the maximum file size ([`ArchiveError::FileTooLarge`])
     /// - The total extracted size exceeds the limit ([`ArchiveError::TotalSizeTooLarge`])
+    /// - An entry path or link target would escape the extraction root
+    ///   ([`ArchiveError::UnsafePath`])
+    /// - A buffer for an entry cannot be allocated ([`ArchiveError::AllocationFailed`])
     /// - An I/O error occurs during extraction ([`ArchiveError::Io`])
     /// - A ZIP-specific error occurs ([`ArchiveError::Zip`])
     ///
@@ -458,7 +488,7 @@ impl ArchiveExtractor {
     /// # }
     /// ```
     pub fn extract(&self, data: &[u8], format: ArchiveFormat) -> Result<Vec<ArchiveEntry>> {
-        match format {
+        let entries = match format {
             ArchiveFormat::Zip => self.extract_zip(data),
             ArchiveFormat::Tar => self.extract_tar(data),
             ArchiveFormat::Ar => self.extract_ar(data),
@@ -474,7 +504,64 @@ impl ArchiveExtractor {
             ArchiveFormat::Xz => self.extract_single_xz(data),
             ArchiveFormat::Lz4 => self.extract_single_lz4(data),
             ArchiveFormat::Zst => self.extract_single_zst(data),
+        }?;
+
+        validate_links(&entries)?;
+        Ok(entries)
+    }
+
+    /// Reads the contents of one archive entry.
+    ///
+    /// The declared size is untrusted archive metadata: it is only used to
+    /// reject an obviously too large claim up front and to size the buffer.
+    /// The actual bytes produced are bounded by both `max_file_size` and the
+    /// space left in `max_total_size`, regardless of what is declared.
+    fn read_entry(
+        &self,
+        reader: &mut (impl Read + ?Sized),
+        declared_size: u64,
+        total_size: &mut usize,
+    ) -> Result<Vec<u8>> {
+        let declared_size = usize::try_from(declared_size).unwrap_or(usize::MAX);
+        if declared_size > self.max_file_size {
+            return Err(ArchiveError::FileTooLarge {
+                size: declared_size,
+                limit: self.max_file_size,
+            });
         }
+
+        let remaining_total = self.max_total_size.saturating_sub(*total_size);
+        if declared_size > remaining_total {
+            return Err(ArchiveError::TotalSizeTooLarge {
+                size: total_size.saturating_add(declared_size),
+                limit: self.max_total_size,
+            });
+        }
+
+        let limit = self.max_file_size.min(remaining_total);
+        let mut contents = Vec::new();
+        reserve_exact(&mut contents, declared_size)?;
+        bounded_read_to_end(reader, &mut contents, limit).map_err(|e| match e {
+            ArchiveError::FileTooLarge { size, .. } if size <= self.max_file_size => {
+                ArchiveError::TotalSizeTooLarge {
+                    size: total_size.saturating_add(size),
+                    limit: self.max_total_size,
+                }
+            }
+            ArchiveError::FileTooLarge { size, .. } => ArchiveError::FileTooLarge {
+                size,
+                limit: self.max_file_size,
+            },
+            other => other,
+        })?;
+
+        // An entry that declares more than it contains must not keep the
+        // unused capacity, or many small entries could hold far more memory
+        // than `max_total_size` allows.
+        contents.shrink_to_fit();
+
+        *total_size += contents.len();
+        Ok(contents)
     }
 
     fn extract_zip(&self, data: &[u8]) -> Result<Vec<ArchiveEntry>> {
@@ -494,35 +581,11 @@ impl ArchiveExtractor {
                 .is_some_and(|mode| mode & S_IFMT == S_IFLNK);
 
             if !is_directory {
-                // The declared size is untrusted archive metadata: reject
-                // an obviously-too-large claim up front without bothering
-                // to decompress, but don't treat a small claim as proof
-                // the entry actually is small — `bounded_read_to_end`
-                // enforces the real limit against the actual bytes
-                // produced below, regardless of what's declared here.
-                let size = file.size() as usize;
-                if size > self.max_file_size {
-                    return Err(ArchiveError::FileTooLarge {
-                        size,
-                        limit: self.max_file_size,
-                    });
-                }
-
-                let mut contents = Vec::new();
-                reserve_exact(&mut contents, size)?;
-                bounded_read_to_end(&mut file, &mut contents, self.max_file_size)?;
-
-                total_size += contents.len();
-                if total_size > self.max_total_size {
-                    return Err(ArchiveError::TotalSizeTooLarge {
-                        size: total_size,
-                        limit: self.max_total_size,
-                    });
-                }
+                let size = file.size();
+                let contents = self.read_entry(&mut file, size, &mut total_size)?;
 
                 if is_symlink {
                     let target = String::from_utf8_lossy(&contents).into_owned();
-                    validate_path(&target)?;
                     files.push(ArchiveEntry::Symlink { path, target });
                 } else {
                     files.push(ArchiveEntry::File {
@@ -634,37 +697,13 @@ impl ArchiveExtractor {
             if entry.is_directory() {
                 files.push(ArchiveEntry::Directory { path });
             } else {
-                // See the comment in extract_zip: the declared size is
-                // untrusted metadata, so it's only used to fast-reject an
-                // obviously-too-large claim here. The actual read below is
-                // bounded independently of what's declared.
-                let size = entry.size() as usize;
-                if size > self.max_file_size {
-                    early_error = Some(ArchiveError::FileTooLarge {
-                        size,
-                        limit: self.max_file_size,
-                    });
-                    return Ok(false); // Stop iteration
-                }
-
-                let mut contents = Vec::new();
-                if let Err(e) = reserve_exact(&mut contents, size) {
-                    early_error = Some(e);
-                    return Ok(false); // Stop iteration
-                }
-                if let Err(e) = bounded_read_to_end(reader, &mut contents, self.max_file_size) {
-                    early_error = Some(e);
-                    return Ok(false); // Stop iteration
-                }
-
-                total_size += contents.len();
-                if total_size > self.max_total_size {
-                    early_error = Some(ArchiveError::TotalSizeTooLarge {
-                        size: total_size,
-                        limit: self.max_total_size,
-                    });
-                    return Ok(false); // Stop iteration
-                }
+                let contents = match self.read_entry(reader, entry.size(), &mut total_size) {
+                    Ok(contents) => contents,
+                    Err(e) => {
+                        early_error = Some(e);
+                        return Ok(false); // Stop iteration
+                    }
+                };
 
                 files.push(ArchiveEntry::File {
                     path,
@@ -784,48 +823,30 @@ impl ArchiveExtractor {
             validate_path(&path)?;
 
             let entry_type = entry.header().entry_type();
-            let is_directory = entry_type.is_dir();
-            let is_symlink = entry_type.is_symlink() || entry_type.is_hard_link();
 
-            if is_symlink {
+            if entry_type.is_symlink() || entry_type.is_hard_link() {
                 let target = entry
                     .link_name()?
                     .map(|t| t.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                validate_path(&target)?;
+                    .ok_or_else(|| {
+                        ArchiveError::InvalidArchive(format!("link without target: {path}"))
+                    })?;
 
-                files.push(ArchiveEntry::Symlink { path, target });
-            } else if !is_directory {
-                // See the comment in extract_zip: the declared size is
-                // untrusted metadata, so it's only used to fast-reject an
-                // obviously-too-large claim here. The actual read below is
-                // bounded independently of what's declared.
-                let size = entry.size() as usize;
-                if size > self.max_file_size {
-                    return Err(ArchiveError::FileTooLarge {
-                        size,
-                        limit: self.max_file_size,
-                    });
+                if entry_type.is_hard_link() {
+                    validate_path(&target)?;
+                    files.push(ArchiveEntry::HardLink { path, target });
+                } else {
+                    files.push(ArchiveEntry::Symlink { path, target });
                 }
-
-                let mut contents = Vec::new();
-                reserve_exact(&mut contents, size)?;
-                bounded_read_to_end(&mut entry, &mut contents, self.max_file_size)?;
-
-                total_size += contents.len();
-                if total_size > self.max_total_size {
-                    return Err(ArchiveError::TotalSizeTooLarge {
-                        size: total_size,
-                        limit: self.max_total_size,
-                    });
-                }
-
+            } else if entry_type.is_dir() {
+                files.push(ArchiveEntry::Directory { path });
+            } else {
+                let size = entry.size();
+                let contents = self.read_entry(&mut entry, size, &mut total_size)?;
                 files.push(ArchiveEntry::File {
                     path,
                     data: contents,
                 });
-            } else {
-                files.push(ArchiveEntry::Directory { path });
             }
         }
 
@@ -844,29 +865,8 @@ impl ArchiveExtractor {
             let path = String::from_utf8_lossy(entry.header().identifier()).to_string();
             validate_path(&path)?;
 
-            // See the comment in extract_zip: the declared size is
-            // untrusted metadata, so it's only used to fast-reject an
-            // obviously-too-large claim here. The actual read below is
-            // bounded independently of what's declared.
-            let size = entry.header().size() as usize;
-            if size > self.max_file_size {
-                return Err(ArchiveError::FileTooLarge {
-                    size,
-                    limit: self.max_file_size,
-                });
-            }
-
-            let mut contents = Vec::new();
-            reserve_exact(&mut contents, size)?;
-            bounded_read_to_end(&mut entry, &mut contents, self.max_file_size)?;
-
-            total_size += contents.len();
-            if total_size > self.max_total_size {
-                return Err(ArchiveError::TotalSizeTooLarge {
-                    size: total_size,
-                    limit: self.max_total_size,
-                });
-            }
+            let size = entry.header().size();
+            let contents = self.read_entry(&mut entry, size, &mut total_size)?;
 
             files.push(ArchiveEntry::File {
                 path,
