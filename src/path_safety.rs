@@ -6,7 +6,7 @@
 //! components or absolute paths to try to escape the directory a caller
 //! intends to extract into, or to point a symlink at a file outside that
 //! directory. This module centralizes the checks used by every format's
-//! extraction path so callers can trust that [`crate::ExtractedFile::path`]
+//! extraction path so callers can trust that [`crate::ArchiveEntry::path`]
 //! (and symlink targets) never contain such components.
 
 use crate::error::{ArchiveError, Result};

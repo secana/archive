@@ -57,7 +57,11 @@ fn reserve_exact(buf: &mut Vec<u8>, size: usize) -> Result<()> {
 /// [`ArchiveError::FileTooLarge`] as soon as more than `limit` bytes have
 /// been produced, instead of letting a decompression bomb fully materialize
 /// in memory before the size is checked.
-fn bounded_read_to_end(reader: &mut (impl Read + ?Sized), buf: &mut Vec<u8>, limit: usize) -> Result<()> {
+fn bounded_read_to_end(
+    reader: &mut (impl Read + ?Sized),
+    buf: &mut Vec<u8>,
+    limit: usize,
+) -> Result<()> {
     let mut writer = BoundedWriter::new(buf, limit);
     let result = std::io::copy(reader, &mut writer);
     let total_seen = writer.total_seen;
@@ -864,7 +868,10 @@ impl ArchiveExtractor {
                 });
             }
 
-            files.push(ArchiveEntry::File { path, data: contents });
+            files.push(ArchiveEntry::File {
+                path,
+                data: contents,
+            });
         }
 
         Ok(files)

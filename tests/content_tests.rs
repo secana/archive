@@ -67,5 +67,9 @@ fn test_large_file_extraction() {
     let large_file = assert_contains_file(&files, "large-file.bin");
 
     // Should be 1MB of random data
-    assert_eq!(large_file.data().unwrap().len(), 1024 * 1024, "Expected 1MB file");
+    assert_eq!(
+        large_file.data().unwrap().len(),
+        1024 * 1024,
+        "Expected 1MB file"
+    );
 }

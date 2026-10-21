@@ -10,8 +10,8 @@
 //! case) and confirms extraction is now rejected via `FileTooLarge`.
 
 use archive::{ArchiveError, ArchiveExtractor, ArchiveFormat};
-use flate2::write::DeflateEncoder;
 use flate2::Compression;
+use flate2::write::DeflateEncoder;
 use std::io::Write;
 
 /// Builds a single-entry zip where the declared uncompressed size lies:
